@@ -65,8 +65,8 @@ void SpectrumDisplay::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
 
-    // Dark background for spectrum area
-    g.setColour(juce::Colour(0x0a, 0x0a, 0x18));
+    // Fill background so baked-in Blender spectrum doesn't show through
+    g.setColour(juce::Colour(0x0a, 0x2a, 0x2a));
     g.fillRect(bounds);
 
     // Reserve right side for key display if active
@@ -118,7 +118,7 @@ void SpectrumDisplay::paint(juce::Graphics& g)
         // Bright teal text, opacity scales with confidence
         float alpha = 0.5f + displayConfidence * 0.5f;
         g.setColour(juce::Colour::fromFloatRGBA(0.0f, 0.9f, 1.0f, alpha));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)).boldened());
+        g.setFont(juce::Font(11.0f).boldened());
 
         auto keyArea = bounds.removeFromRight(keyDisplayWidth);
         g.drawText(keyText, keyArea, juce::Justification::centred, false);

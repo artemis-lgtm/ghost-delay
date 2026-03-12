@@ -35,8 +35,6 @@ target_sources(GhostDelay
         Source/PluginEditor.h
         Source/GhostRenderer.cpp
         Source/GhostRenderer.h
-        Source/GhostLookAndFeel.h
-        Source/SelfCapture.h
         Source/FilmstripKnob.cpp
         Source/FilmstripKnob.h
         Source/SpectralDelay.cpp
@@ -45,7 +43,7 @@ target_sources(GhostDelay
         Source/SpectrumDisplay.h
 )
 
-# Binary resources — Blender background + filmstrip knobs + ghost spritesheet
+# Binary resources from Blender renders
 juce_add_binary_data(GhostDelayData
     HEADER_NAME "BinaryData.h"
     NAMESPACE BinaryData

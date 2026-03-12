@@ -303,10 +303,7 @@ void SpectralDelay::processHop(int channel)
     fft.performRealOnlyInverseTransform(fftWorkspace.data());
 
     window.multiplyWithWindowingTable(fftWorkspace.data(), FFT_SIZE);
-
-    // JUCE Apple vDSP FFT: forward(0.5 cancel vDSP 2x) + inverse(1/N cancel unnorm)
-    // Round trip = unity. Only need to compensate Hann×Hann OLA sum = 1.5
-    float gain = 2.0f / 3.0f;
+    float gain = 1.0f / (FFT_SIZE * 0.375f);
 
     for (int i = 0; i < FFT_SIZE; ++i)
     {
