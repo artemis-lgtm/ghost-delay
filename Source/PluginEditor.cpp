@@ -88,6 +88,14 @@ void GhostDelayEditor::timerCallback()
     // Feed detected key to spectrum display
     auto keyInfo = processor.getDetectedKey();
     spectrumDisplay.setDetectedKey(keyInfo.rootNote, keyInfo.isMinor, keyInfo.confidence);
+
+    // Self-capture: check for trigger file
+    juce::File trigger("/tmp/ghost_capture_trigger");
+    if (trigger.existsAsFile())
+    {
+        trigger.deleteFile();
+        SelfCapture::capture(this);
+    }
 }
 
 void GhostDelayEditor::paint(juce::Graphics& g)
@@ -160,7 +168,7 @@ void GhostDelayEditor::resized()
     ghostRenderer.setSpriteOffset(282, 388);
 
     // Spectrum display — Display_Screen area: (327, 86, 245x36)
-    spectrumDisplay.setBounds(327, 86, 245, 36);
+    spectrumDisplay.setBounds(316, 72, 266, 45);
 
     // Bypass button over LED: (643, 558) with padding
     bypassButton.setBounds(623, 538, 54, 54);

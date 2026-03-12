@@ -4,6 +4,7 @@
 #include "FilmstripKnob.h"
 #include "GhostRenderer.h"
 #include "SpectrumDisplay.h"
+#include "SelfCapture.h"
 
 class GhostDelayEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
