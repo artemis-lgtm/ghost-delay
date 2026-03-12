@@ -109,29 +109,29 @@ void GhostDelayEditor::paint(juce::Graphics& g)
 
 void GhostDelayEditor::resized()
 {
-    int knobSize = 40;
+    int knobSize = 80;
     int halfKnob = knobSize / 2;
 
-    // Exact positions from Blender camera projection at 900x600
-    // Top row: SPREAD(330,95), DIR(418,96), TIME(507,97), FDBK(596,99)
-    knobSpread->setBounds(330 - halfKnob, 95 - halfKnob, knobSize, knobSize);
-    knobDir->setBounds(418 - halfKnob, 96 - halfKnob, knobSize, knobSize);
-    knobTime->setBounds(507 - halfKnob, 97 - halfKnob, knobSize, knobSize);
-    knobFdbk->setBounds(596 - halfKnob, 99 - halfKnob, knobSize, knobSize);
+    // Flat orthographic top-down positions from Blender at 900x600
+    // Top row: SPREAD(310,178), DIR(403,178), TIME(496,178), FDBK(589,178)
+    knobSpread->setBounds(310 - halfKnob, 178 - halfKnob, knobSize, knobSize);
+    knobDir->setBounds(403 - halfKnob, 178 - halfKnob, knobSize, knobSize);
+    knobTime->setBounds(496 - halfKnob, 178 - halfKnob, knobSize, knobSize);
+    knobFdbk->setBounds(589 - halfKnob, 178 - halfKnob, knobSize, knobSize);
 
-    // Bottom row: ENV(320,211), FREEZE(412,213), TILT(504,215), MIX(597,216)
-    knobEnv->setBounds(320 - halfKnob, 211 - halfKnob, knobSize, knobSize);
-    knobFreeze->setBounds(412 - halfKnob, 213 - halfKnob, knobSize, knobSize);
-    knobTilt->setBounds(504 - halfKnob, 215 - halfKnob, knobSize, knobSize);
-    knobMix->setBounds(597 - halfKnob, 216 - halfKnob, knobSize, knobSize);
+    // Bottom row: ENV(310,290), FREEZE(403,290), TILT(496,290), MIX(589,290)
+    knobEnv->setBounds(310 - halfKnob, 290 - halfKnob, knobSize, knobSize);
+    knobFreeze->setBounds(403 - halfKnob, 290 - halfKnob, knobSize, knobSize);
+    knobTilt->setBounds(496 - halfKnob, 290 - halfKnob, knobSize, knobSize);
+    knobMix->setBounds(589 - halfKnob, 290 - halfKnob, knobSize, knobSize);
 
-    // Ghost renderer — Blender-projected walk bounds: offset(296,307), size 313x84
-    ghostRenderer.setBounds(296, 307, 313, 84);
-    ghostRenderer.setSpriteOffset(296, 307);
+    // Ghost renderer — ScreenBacking area: (282, 388, 335x103)
+    ghostRenderer.setBounds(282, 388, 335, 103);
+    ghostRenderer.setSpriteOffset(282, 388);
 
-    // Spectrum display — exact Blender Display_Screen bbox: (343, 36, 241x32)
-    spectrumDisplay.setBounds(343, 36, 241, 32);
+    // Spectrum display — Display_Screen area: (327, 86, 245x36)
+    spectrumDisplay.setBounds(327, 86, 245, 36);
 
-    // Bypass button over LED: bbox(642, 454, 34x39) with padding
-    bypassButton.setBounds(632, 444, 54, 59);
+    // Bypass button over LED: (643, 558) with padding
+    bypassButton.setBounds(623, 538, 54, 54);
 }
