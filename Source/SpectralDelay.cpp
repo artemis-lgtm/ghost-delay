@@ -304,10 +304,9 @@ void SpectralDelay::processHop(int channel)
 
     window.multiplyWithWindowingTable(fftWorkspace.data(), FFT_SIZE);
 
-    // JUCE Apple vDSP: forward scales by 0.5, inverse scales by 1/N
-    // Round-trip factor = 0.5/N. With Hann×Hann OLA (75% overlap) sum = 1.5
-    // Unity gain = N / (0.5 * 1.5) = N / 0.75 = 1365.33 for N=1024
-    float gain = static_cast<float>(FFT_SIZE) / 0.75f;
+    // JUCE Apple vDSP FFT: forward(0.5 cancel vDSP 2x) + inverse(1/N cancel unnorm)
+    // Round trip = unity. Only need to compensate Hann×Hann OLA sum = 1.5
+    float gain = 2.0f / 3.0f;
 
     for (int i = 0; i < FFT_SIZE; ++i)
     {
