@@ -4,7 +4,7 @@
 /**
  * SelfCapture — lets the plugin save a screenshot of itself.
  * No macOS permissions required since we're rendering our own component.
- * Call capture() with the editor component to save to /tmp/ghost_screenshot.png
+ * Captures at 2x scale for Retina-quality output.
  */
 class SelfCapture
 {
@@ -13,7 +13,8 @@ public:
     {
         if (editor == nullptr) return;
         
-        auto snapshot = editor->createComponentSnapshot(editor->getLocalBounds());
+        // Capture at 2x for Retina-quality screenshots
+        auto snapshot = editor->createComponentSnapshot(editor->getLocalBounds(), true, 2.0f);
         
         juce::File file(path);
         file.deleteFile();
