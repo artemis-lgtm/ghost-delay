@@ -34,6 +34,7 @@ public:
     // For UI
     float getCurrentRMSLevel() const { return rmsLevel.load(); }
     void getSpectrum(float* dest, int numBins) const { spectralDelay.getSpectrum(dest, numBins); }
+    SpectralDelay::KeyInfo getDetectedKey() const { return spectralDelay.getDetectedKey(); }
 
     // Bypass state
     bool isBypassed() const { return bypassed.load(); }

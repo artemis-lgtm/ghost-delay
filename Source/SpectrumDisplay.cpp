@@ -54,16 +54,27 @@ void SpectrumDisplay::timerCallback()
     repaint();
 }
 
+void SpectrumDisplay::setDetectedKey(int rootNote, bool isMinor, float confidence)
+{
+    displayRootNote = rootNote;
+    displayIsMinor = isMinor;
+    displayConfidence = confidence;
+}
+
 void SpectrumDisplay::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    float barWidth = bounds.getWidth() / NUM_BARS;
+
+    // Reserve right side for key display if active
+    float keyDisplayWidth = (displayRootNote >= 0 && displayConfidence > 0.3f) ? 28.0f : 0.0f;
+    auto barBounds = bounds.withTrimmedRight(keyDisplayWidth);
+    float barWidth = barBounds.getWidth() / NUM_BARS;
     float gap = 1.0f; // 1px gap between bars
 
     for (int i = 0; i < NUM_BARS; ++i)
     {
-        float x = bounds.getX() + i * barWidth;
-        float barH = barValues[i] * bounds.getHeight();
+        float x = barBounds.getX() + i * barWidth;
+        float barH = barValues[i] * barBounds.getHeight();
 
         // Bar color: teal gradient, brighter at top
         float intensity = 0.4f + barValues[i] * 0.6f;
@@ -76,16 +87,36 @@ void SpectrumDisplay::paint(juce::Graphics& g)
         // Draw bar from bottom
         g.setColour(barColor);
         g.fillRect(x + gap * 0.5f,
-                   bounds.getBottom() - barH,
+                   barBounds.getBottom() - barH,
                    barWidth - gap,
                    barH);
 
         // Peak indicator (thin bright line)
         if (barPeaks[i] > 0.02f)
         {
-            float peakY = bounds.getBottom() - barPeaks[i] * bounds.getHeight();
+            float peakY = barBounds.getBottom() - barPeaks[i] * barBounds.getHeight();
             g.setColour(juce::Colour::fromFloatRGBA(0.2f, 0.9f, 0.95f, 0.9f));
             g.fillRect(x + gap * 0.5f, peakY, barWidth - gap, 1.0f);
         }
+    }
+
+    // ── Key indicator (right side of screen) ─────────────────────
+    if (displayRootNote >= 0 && displayConfidence > 0.3f)
+    {
+        static const char* noteNames[12] = {
+            "C", "C#", "D", "D#", "E", "F",
+            "F#", "G", "G#", "A", "A#", "B"
+        };
+
+        juce::String keyText = juce::String(noteNames[displayRootNote]);
+        keyText += displayIsMinor ? "m" : "";
+
+        // Bright teal text, opacity scales with confidence
+        float alpha = 0.5f + displayConfidence * 0.5f;
+        g.setColour(juce::Colour::fromFloatRGBA(0.0f, 0.9f, 1.0f, alpha));
+        g.setFont(juce::Font(11.0f).boldened());
+
+        auto keyArea = bounds.removeFromRight(keyDisplayWidth);
+        g.drawText(keyText, keyArea, juce::Justification::centred, false);
     }
 }

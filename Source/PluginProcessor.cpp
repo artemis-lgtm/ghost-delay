@@ -48,6 +48,11 @@ GhostDelayProcessor::createParameterLayout()
         juce::ParameterID("envelope", 1), "ENV",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
 
+    // Key-aware harmonic filtering (no visible knob -- host automation only)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("keyAware", 1), "KEY",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
+
     return { params.begin(), params.end() };
 }
 
@@ -78,6 +83,7 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     spectralDelay.setSpread(*apvts.getRawParameterValue("spread"));
     spectralDelay.setDirection(*apvts.getRawParameterValue("direction"));
     spectralDelay.setEnvelope(*apvts.getRawParameterValue("envelope"));
+    spectralDelay.setKeyAware(*apvts.getRawParameterValue("keyAware"));
 
     spectralDelay.process(buffer);
 

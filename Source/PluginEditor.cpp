@@ -4,8 +4,6 @@
 GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
-    setSize(900, 600);
-
     // Load background (Blender-rendered pedal body, no ghost/LED)
     background = juce::ImageCache::getFromMemory(
         BinaryData::background_png, BinaryData::background_pngSize);
@@ -67,6 +65,9 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
 
     // Timer to feed spectrum data from processor to display
     startTimerHz(30);
+
+    // Set size LAST so resized() doesn't fire before components exist
+    setSize(900, 600);
 }
 
 GhostDelayEditor::~GhostDelayEditor()
@@ -83,6 +84,10 @@ void GhostDelayEditor::timerCallback()
     float spectrum[48];
     processor.getSpectrum(spectrum, 48);
     spectrumDisplay.updateSpectrum(spectrum, 48);
+
+    // Feed detected key to spectrum display
+    auto keyInfo = processor.getDetectedKey();
+    spectrumDisplay.setDetectedKey(keyInfo.rootNote, keyInfo.isMinor, keyInfo.confidence);
 }
 
 void GhostDelayEditor::paint(juce::Graphics& g)

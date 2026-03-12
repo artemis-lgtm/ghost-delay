@@ -6,7 +6,8 @@
 
 /**
  * AGGRESSIVE spectral delay engine — FFT-based with per-bin delay, self-oscillating
- * feedback, spectral gating, frequency mirroring, cross-bin smearing, and phase scattering.
+ * feedback, spectral gating, frequency mirroring, cross-bin smearing, phase scattering,
+ * and audio-based pitch detection with key-aware harmonic filtering.
  */
 class SpectralDelay
 {
@@ -26,8 +27,17 @@ public:
     void setSpread(float v)   { spread = v; }
     void setDirection(float v){ direction = v; }
     void setEnvelope(float v) { envelope = v; }
+    void setKeyAware(float v) { keyAware = v; }    // 0=off, 1=full key filtering
 
     void getSpectrum(float* dest, int numBins) const;
+
+    // Pitch detection results for UI display
+    struct KeyInfo {
+        int rootNote = -1;          // MIDI note of detected root (0-11, -1 = none)
+        bool isMinor = false;       // true = minor, false = major
+        float confidence = 0.0f;    // 0-1 how confident the detection is
+    };
+    KeyInfo getDetectedKey() const { return detectedKey.load(); }
 
 private:
     static constexpr int FFT_ORDER = 10;
@@ -74,6 +84,45 @@ private:
     float spread     = 0.0f;
     float direction  = 1.0f;
     float envelope   = 0.5f;
+    float keyAware   = 0.0f;
+
+    // ── Pitch detection (YIN + Krumhansl-Kessler) ────────────────
+    static constexpr int YIN_BUFFER_SIZE = 2048;
+    std::array<float, YIN_BUFFER_SIZE> yinBuffer {};
+    int yinWritePos = 0;
+    int yinSampleCount = 0;
+    static constexpr int YIN_HOP = 512;             // Run pitch detection every 512 samples
+    static constexpr float YIN_THRESHOLD = 0.15f;
+
+    // Chroma accumulator (12 pitch classes, running average)
+    std::array<float, 12> chromaAccum {};
+    float chromaDecay = 0.92f;                       // Smooth over ~0.5s at typical hop rates
+
+    // Key detection result (atomic for thread-safe UI reads)
+    struct AtomicKeyInfo {
+        std::atomic<int> rootNote { -1 };
+        std::atomic<bool> isMinor { false };
+        std::atomic<float> confidence { 0.0f };
+        KeyInfo load() const { return { rootNote.load(), isMinor.load(), confidence.load() }; }
+        void store(const KeyInfo& k) { rootNote.store(k.rootNote); isMinor.store(k.isMinor); confidence.store(k.confidence); }
+    };
+    AtomicKeyInfo detectedKey;
+
+    // Key-aware bin mask: 1.0 = in-key, 0.15 = out-of-key (per bin)
+    std::array<float, 513> keyMask {};
 
     void processHop(int channel);
+    float detectPitchYIN(const float* buffer, int length) const;
+    void updateChromaAndKey(float pitchHz);
+    void rebuildKeyMask();
+
+    // Krumhansl-Kessler key profiles (major and minor)
+    static constexpr float majorProfile[12] = {
+        6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f,
+        2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f
+    };
+    static constexpr float minorProfile[12] = {
+        6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f,
+        2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f
+    };
 };
