@@ -38,6 +38,10 @@ void GhostRenderer::timerCallback()
 
 void GhostRenderer::paint(juce::Graphics& g)
 {
+    // Fill with screen color to cover any baked-in ghost from background
+    g.setColour(juce::Colour(0x1a, 0x4a, 0x3a));
+    g.fillRect(getLocalBounds());
+
     if (spritesheet.isNull() || frameWidth == 0 || frameHeight == 0)
         return;
 

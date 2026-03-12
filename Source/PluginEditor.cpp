@@ -98,12 +98,42 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     else
         g.fillAll(juce::Colour(0x1a, 0x1a, 0x1a));
 
+    // ── Paint over the baked-in ghost from Blender background ────
+    // The GhostRenderer component draws the animated ghost on top.
+    // We need to cover the static ghost that's baked into the background render.
+    // ScreenBacking area: (282, 388, 335x103)
+    g.setColour(juce::Colour(0x1a, 0x4a, 0x3a)); // match the teal screen color
+    g.fillRect(284, 390, 331, 99);
+
+    // ── Paint over the baked-in spectrum from Blender background ─
+    // Display_Screen area: (327, 86, 245x36)
+    g.setColour(juce::Colour(0x0a, 0x2a, 0x2a)); // dark teal for spectrum area
+    g.fillRect(328, 87, 243, 34);
+
+    // ── Knob labels ─────────────────────────────────────────────
+    g.setColour(juce::Colour(0xcc, 0xcc, 0xdd));
+    g.setFont(juce::Font(11.0f).boldened());
+
+    // Top row labels (below knobs): y = knob center 178 + half knob 40 + gap 4 = 222
+    int labelY1 = 222;
+    g.drawText("SPREAD", 310 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("DIR",    403 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("TIME",   496 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("FDBK",   589 - 40, labelY1, 80, 14, juce::Justification::centred);
+
+    // Bottom row labels (below knobs): y = 290 + 40 + 4 = 334
+    int labelY2 = 334;
+    g.drawText("ENV",    310 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("FREEZE", 403 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("TILT",   496 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("MIX",    589 - 40, labelY2, 80, 14, juce::Justification::centred);
+
     // Draw LED (on/off based on bypass state)
     auto& led = processor.isBypassed() ? ledOff : ledOn;
     if (!led.isNull())
     {
-        // Exact position from Blender: bbox(642, 454, 34x39)
-        g.drawImage(led, 642, 454, 34, 39, 0, 0, led.getWidth(), led.getHeight());
+        // LED position from flat orthographic: (643, 558) centered
+        g.drawImage(led, 626, 541, 34, 34, 0, 0, led.getWidth(), led.getHeight());
     }
 }
 

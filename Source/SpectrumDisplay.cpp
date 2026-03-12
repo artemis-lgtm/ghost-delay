@@ -65,6 +65,10 @@ void SpectrumDisplay::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
 
+    // Fill background so baked-in Blender spectrum doesn't show through
+    g.setColour(juce::Colour(0x0a, 0x2a, 0x2a));
+    g.fillRect(bounds);
+
     // Reserve right side for key display if active
     float keyDisplayWidth = (displayRootNote >= 0 && displayConfidence > 0.3f) ? 28.0f : 0.0f;
     auto barBounds = bounds.withTrimmedRight(keyDisplayWidth);
