@@ -2,88 +2,46 @@
 #include "BinaryData.h"
 #include "SelfCapture.h"
 
-// ────────────────────────────────────────────────────────────────
-// Pixel-accurate positions from background.png analysis
-// (NOT from Blender projection — those were wrong)
-//
-// Background: 500 x 657
-// Knob circles: 50px diameter, white/cream
-// LED screen: dark interior within metallic bezel
-// Ghost screen: teal/dark interior at bottom
-// ────────────────────────────────────────────────────────────────
-
-static constexpr int kW = 500;
-static constexpr int kH = 657;
-static constexpr int kKnobSize = 50;
-
-// REAL knob centers (pixel-measured from background.png)
-struct KnobPos { int x, y; const char* label; };
-
-// Ground truth from pixel analysis (threshold>200, confirmed across y=148-155 and y=310-317)
-// These are EXACT centers of the white circles in the Blender background
-static const KnobPos topRow[] = {
-    { 46,  151, "SPREAD" },
-    { 182, 151, "DIR" },
-    { 317, 151, "TIME" },
-    { 452, 151, "FDBK" }
-};
-
-static const KnobPos botRow[] = {
-    { 46,  313, "ENV" },
-    { 182, 313, "FREEZE" },
-    { 317, 313, "TILT" },
-    { 452, 313, "MIX" }
-};
-
-// LED screen interior (pixel-measured)
-// Bezel edge starts ~y=58, screen surface y=62-116, x=58-456
-static constexpr int kLedX = 58, kLedY = 62, kLedW = 398, kLedH = 54;
-
-// Ghost screen interior (pixel-measured)
-// Dark interior y=440-555, x=25-475
-static constexpr int kGhostX = 25, kGhostY = 440, kGhostW = 450, kGhostH = 115;
-
-// Label position: knob white circles end at y = center + 25
-// Metal surface starts at y ~ center + 28
-// Labels sit at knobY + 28
-static constexpr int kLabelOffY = 28;
-
 GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
-    // Load background
-    backgroundImage = juce::ImageCache::getFromMemory(
+    // Load background (Blender-rendered pedal body — no text, no knob domes, no ghost)
+    background = juce::ImageCache::getFromMemory(
         BinaryData::background_png, BinaryData::background_pngSize);
 
-    // Create filmstrip knobs
-    auto makeKnob = [this](const void* data, size_t size) -> std::unique_ptr<FilmstripKnob>
+    // Load LED states
+    ledOn = juce::ImageCache::getFromMemory(
+        BinaryData::led_on_png, BinaryData::led_on_pngSize);
+    ledOff = juce::ImageCache::getFromMemory(
+        BinaryData::led_off_png, BinaryData::led_off_pngSize);
+
+    // Create filmstrip knobs (128 frames each, transparent background)
+    auto makeKnob = [this](const char* name, const void* data, size_t size)
     {
-        auto k = std::make_unique<FilmstripKnob>("knob", data, size, 128);
-        k->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        k->setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
-        addAndMakeVisible(*k);
+        auto k = std::make_unique<FilmstripKnob>(name, data, size, 128);
+        addAndMakeVisible(k.get());
         return k;
     };
 
-    knobSpread = makeKnob(BinaryData::knob_SPREAD_png, BinaryData::knob_SPREAD_pngSize);
-    knobDir    = makeKnob(BinaryData::knob_DIR_png,    BinaryData::knob_DIR_pngSize);
-    knobTime   = makeKnob(BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
-    knobFdbk   = makeKnob(BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
-    knobEnv    = makeKnob(BinaryData::knob_ENV_png,     BinaryData::knob_ENV_pngSize);
-    knobFreeze = makeKnob(BinaryData::knob_FREEZE_png,  BinaryData::knob_FREEZE_pngSize);
-    knobTilt   = makeKnob(BinaryData::knob_TILT_png,    BinaryData::knob_TILT_pngSize);
-    knobMix    = makeKnob(BinaryData::knob_MIX_png,     BinaryData::knob_MIX_pngSize);
+    knobSpread = makeKnob("SPREAD", BinaryData::knob_SPREAD_png, BinaryData::knob_SPREAD_pngSize);
+    knobTime   = makeKnob("TIME",   BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
+    knobDir    = makeKnob("DIR",    BinaryData::knob_DIR_png,    BinaryData::knob_DIR_pngSize);
+    knobFdbk   = makeKnob("FDBK",   BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
+    knobEnv    = makeKnob("ENV",    BinaryData::knob_ENV_png,    BinaryData::knob_ENV_pngSize);
+    knobFreeze = makeKnob("FREEZE", BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
+    knobTilt   = makeKnob("TILT",   BinaryData::knob_TILT_png,   BinaryData::knob_TILT_pngSize);
+    knobMix    = makeKnob("MIX",    BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
 
     // Attach to APVTS
     auto& apvts = processor.getAPVTS();
-    attSpread = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "spread",    *knobSpread);
-    attDir    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "direction", *knobDir);
     attTime   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "time",      *knobTime);
     attFdbk   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "feedback",  *knobFdbk);
-    attEnv    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "envelope",  *knobEnv);
+    attMix    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "mix",       *knobMix);
     attFreeze = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "freeze",    *knobFreeze);
     attTilt   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "tilt",      *knobTilt);
-    attMix    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "mix",       *knobMix);
+    attSpread = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "spread",    *knobSpread);
+    attDir    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "direction", *knobDir);
+    attEnv    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "envelope",  *knobEnv);
 
     // Ghost renderer
     ghostRenderer.loadSpritesheet(
@@ -92,13 +50,26 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
         16, 12, 192);
     addAndMakeVisible(ghostRenderer);
 
-    // Spectrum display (LED screen)
-    addAndMakeVisible(spectrumTop);
+    // Spectrum display
+    addAndMakeVisible(spectrumDisplay);
+
+    // Bypass button (invisible, overlays LED position)
+    bypassButton.setButtonText("");
+    bypassButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    bypassButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
+    bypassButton.onClick = [this]()
+    {
+        processor.setBypassed(!processor.isBypassed());
+        repaint();
+    };
+    addAndMakeVisible(bypassButton);
 
     startTimerHz(30);
-    setSize(kW, kH);
 
-    // Self-capture after paint
+    // Window matches pedal aspect ratio
+    setSize(500, 657);
+
+    // Self-capture after paint completes
     juce::Timer::callAfterDelay(500, [this]() {
         SelfCapture::capture(this);
     });
@@ -115,10 +86,10 @@ void GhostDelayEditor::timerCallback()
 
     float spectrum[48];
     processor.getSpectrum(spectrum, 48);
-    spectrumTop.updateSpectrum(spectrum, 48);
+    spectrumDisplay.updateSpectrum(spectrum, 48);
 
     auto keyInfo = processor.getDetectedKey();
-    spectrumTop.setDetectedKey(keyInfo.rootNote, keyInfo.isMinor, keyInfo.confidence);
+    spectrumDisplay.setDetectedKey(keyInfo.rootNote, keyInfo.isMinor, keyInfo.confidence);
 
     // File-triggered re-capture
     juce::File trigger("/tmp/ghost_capture_trigger");
@@ -131,65 +102,80 @@ void GhostDelayEditor::timerCallback()
 
 void GhostDelayEditor::paint(juce::Graphics& g)
 {
-    // ── Blender background (the entire visual foundation) ───────
-    if (backgroundImage.isValid())
-        g.drawImageAt(backgroundImage, 0, 0);
+    // Draw Blender-rendered background
+    if (!background.isNull())
+        g.drawImage(background, getLocalBounds().toFloat());
     else
-        g.fillAll(juce::Colour(0xff2a2a3a));
+        g.fillAll(juce::Colour(0x1a, 0x1a, 0x1a));
 
-    // ── Paint over baked ghost sprites so GhostRenderer draws clean ─
-    // Match the dark interior color of the ghost screen
-    g.setColour(juce::Colour(0xff0f1717));
-    g.fillRect(kGhostX + 4, kGhostY, kGhostW - 8, kGhostH);
+    // ── Fill screen areas (cover any baked-in artifacts) ────────
+    // ScreenBacking: (64, 427, 372x113)
+    g.setColour(juce::Colour(0x1a, 0x4a, 0x3a));
+    g.fillRect(66, 429, 368, 109);
 
-    // ── Knob labels (embossed look on metal surface) ────────────
-    // Dark shadow underneath, then light text on top = engraved appearance
-    for (auto& k : topRow)
-    {
-        int lx = k.x - 30;
-        int ly = k.y + kLabelOffY;
-        // Shadow (1px down, darker)
-        g.setColour(juce::Colour(0xff1a1e26));
-        g.setFont(juce::Font(juce::FontOptions(10.0f)).boldened());
-        g.drawText(k.label, lx, ly + 1, 60, 13, juce::Justification::centred);
-        // Light text
-        g.setColour(juce::Colour(0xffc0c8d4));
-        g.drawText(k.label, lx, ly, 60, 13, juce::Justification::centred);
-    }
+    // Display_Screen: (108, 81, 284x41)
+    g.setColour(juce::Colour(0x0a, 0x2a, 0x2a));
+    g.fillRect(109, 82, 282, 39);
 
-    for (auto& k : botRow)
-    {
-        int lx = k.x - 30;
-        int ly = k.y + kLabelOffY;
-        g.setColour(juce::Colour(0xff1a1e26));
-        g.setFont(juce::Font(juce::FontOptions(10.0f)).boldened());
-        g.drawText(k.label, lx, ly + 1, 60, 13, juce::Justification::centred);
-        g.setColour(juce::Colour(0xffc0c8d4));
-        g.drawText(k.label, lx, ly, 60, 13, juce::Justification::centred);
-    }
+    // ── Title text ──────────────────────────────────────────────
+    g.setColour(juce::Colour(0xdd, 0xdd, 0xee));
+    g.setFont(juce::Font(juce::FontOptions(16.0f)).boldened());
+    g.drawText("T I N Y   G H O S T", 0, 28, 500, 22, juce::Justification::centred);
+
+    g.setFont(juce::Font(juce::FontOptions(9.0f)));
+    g.setColour(juce::Colour(0x99, 0x99, 0xbb));
+    g.drawText("SPECTRAL DELAY", 0, 50, 500, 14, juce::Justification::centred);
+
+    // ── Knob labels ─────────────────────────────────────────────
+    g.setColour(juce::Colour(0xe0, 0xe4, 0xec));
+    g.setFont(juce::Font(juce::FontOptions(11.0f)).boldened());
+
+    // Top row labels (y = knob center 194 + 26 = 220)
+    int labelY1 = 194 + 26;
+    g.drawText("SPREAD",  95 - 30, labelY1, 60, 13, juce::Justification::centred);
+    g.drawText("DIR",    198 - 30, labelY1, 60, 13, juce::Justification::centred);
+    g.drawText("TIME",   302 - 30, labelY1, 60, 13, juce::Justification::centred);
+    g.drawText("FDBK",   405 - 30, labelY1, 60, 13, juce::Justification::centred);
+
+    // Bottom row labels (y = knob center 318 + 26 = 344)
+    int labelY2 = 318 + 26;
+    g.drawText("ENV",     95 - 30, labelY2, 60, 13, juce::Justification::centred);
+    g.drawText("FREEZE", 198 - 30, labelY2, 60, 13, juce::Justification::centred);
+    g.drawText("TILT",   302 - 30, labelY2, 60, 13, juce::Justification::centred);
+    g.drawText("MIX",    405 - 30, labelY2, 60, 13, juce::Justification::centred);
+
+    // ── LED ─────────────────────────────────────────────────────
+    auto& led = processor.isBypassed() ? ledOff : ledOn;
+    if (!led.isNull())
+        g.drawImage(led, 464 - 17, 615 - 17, 34, 34, 0, 0, led.getWidth(), led.getHeight());
 }
 
 void GhostDelayEditor::resized()
 {
-    // ── Filmstrip knobs at pixel-accurate positions ─────────────
-    auto place = [](std::unique_ptr<FilmstripKnob>& knob, int cx, int cy)
-    {
-        if (knob)
-            knob->setBounds(cx - kKnobSize / 2, cy - kKnobSize / 2, kKnobSize, kKnobSize);
-    };
+    // Knob size: 50px (matches filmstrip frame size)
+    int knobSize = 50;
+    int hk = knobSize / 2;
 
-    place(knobSpread, topRow[0].x, topRow[0].y);
-    place(knobDir,    topRow[1].x, topRow[1].y);
-    place(knobTime,   topRow[2].x, topRow[2].y);
-    place(knobFdbk,   topRow[3].x, topRow[3].y);
-    place(knobEnv,    botRow[0].x, botRow[0].y);
-    place(knobFreeze, botRow[1].x, botRow[1].y);
-    place(knobTilt,   botRow[2].x, botRow[2].y);
-    place(knobMix,    botRow[3].x, botRow[3].y);
+    // Exact skirt center positions from Blender render
+    // Top row: SPREAD(95,194) DIR(198,194) TIME(302,194) FDBK(405,194)
+    knobSpread->setBounds( 95 - hk, 194 - hk, knobSize, knobSize);
+    knobDir->setBounds(   198 - hk, 194 - hk, knobSize, knobSize);
+    knobTime->setBounds(  302 - hk, 194 - hk, knobSize, knobSize);
+    knobFdbk->setBounds(  405 - hk, 194 - hk, knobSize, knobSize);
 
-    // ── LED screen (spectrum display) — fits inside Blender bezel ─
-    spectrumTop.setBounds(kLedX, kLedY, kLedW, kLedH);
+    // Bottom row: ENV(95,318) FREEZE(198,318) TILT(302,318) MIX(405,318)
+    knobEnv->setBounds(    95 - hk, 318 - hk, knobSize, knobSize);
+    knobFreeze->setBounds(198 - hk, 318 - hk, knobSize, knobSize);
+    knobTilt->setBounds(  302 - hk, 318 - hk, knobSize, knobSize);
+    knobMix->setBounds(   405 - hk, 318 - hk, knobSize, knobSize);
 
-    // ── Ghost renderer — fits inside ghost screen interior ──────
-    ghostRenderer.setBounds(kGhostX + 4, kGhostY, kGhostW - 8, kGhostH);
+    // Ghost renderer — ScreenBacking: (64, 427, 372x113)
+    ghostRenderer.setBounds(64, 427, 372, 113);
+    ghostRenderer.setSpriteOffset(64, 427);
+
+    // Spectrum display — Display_Screen: (108, 81, 284x41)
+    spectrumDisplay.setBounds(108, 81, 284, 41);
+
+    // Bypass button around LED: (464, 615) center
+    bypassButton.setBounds(464 - 27, 615 - 27, 54, 54);
 }
