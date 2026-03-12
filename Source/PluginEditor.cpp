@@ -67,7 +67,8 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     startTimerHz(30);
 
     // Set size LAST so resized() doesn't fire before components exist
-    setSize(900, 600);
+    // 500x657: tight crop to pedal shape, no background visible
+    setSize(500, 657);
 }
 
 GhostDelayEditor::~GhostDelayEditor()
@@ -98,70 +99,76 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     else
         g.fillAll(juce::Colour(0x1a, 0x1a, 0x1a));
 
-    // ── Paint over the baked-in ghost from Blender background ────
-    // The GhostRenderer component draws the animated ghost on top.
-    // We need to cover the static ghost that's baked into the background render.
-    // ScreenBacking area: (282, 388, 335x103)
-    g.setColour(juce::Colour(0x1a, 0x4a, 0x3a)); // match the teal screen color
-    g.fillRect(284, 390, 331, 99);
+    // ── Paint over baked-in ghost and spectrum from background ────
+    // Ghost screen area: (74, 421, 351x107)
+    g.setColour(juce::Colour(0x1a, 0x4a, 0x3a));
+    g.fillRect(76, 423, 347, 103);
 
-    // ── Paint over the baked-in spectrum from Blender background ─
-    // Display_Screen area: (327, 86, 245x36)
-    g.setColour(juce::Colour(0x0a, 0x2a, 0x2a)); // dark teal for spectrum area
-    g.fillRect(328, 87, 243, 34);
+    // Spectrum display area: (115, 94, 269x39)
+    g.setColour(juce::Colour(0x0a, 0x2a, 0x2a));
+    g.fillRect(116, 95, 267, 37);
+
+    // ── Title text (drawn in JUCE for exact control) ────────────
+    g.setColour(juce::Colour(0xdd, 0xdd, 0xee));
+    g.setFont(juce::Font(juce::FontOptions(18.0f)).boldened());
+    g.drawText("T I N Y   G H O S T", 0, 30, 500, 28, juce::Justification::centred);
+
+    g.setFont(juce::Font(juce::FontOptions(10.0f)));
+    g.setColour(juce::Colour(0x99, 0x99, 0xbb));
+    g.drawText("SPECTRAL DELAY", 0, 55, 500, 16, juce::Justification::centred);
 
     // ── Knob labels ─────────────────────────────────────────────
     g.setColour(juce::Colour(0xcc, 0xcc, 0xdd));
-    g.setFont(juce::Font(11.0f).boldened());
+    g.setFont(juce::Font(juce::FontOptions(10.0f)).boldened());
 
-    // Top row labels (below knobs): y = knob center 178 + half knob 40 + gap 4 = 222
-    int labelY1 = 222;
-    g.drawText("SPREAD", 310 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("DIR",    403 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("TIME",   496 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("FDBK",   589 - 40, labelY1, 80, 14, juce::Justification::centred);
+    // Top row: y = 201 + 35 + 3 = 239
+    int labelY1 = 239;
+    g.drawText("SPREAD", 103 - 35, labelY1, 70, 12, juce::Justification::centred);
+    g.drawText("DIR",    201 - 35, labelY1, 70, 12, juce::Justification::centred);
+    g.drawText("TIME",   298 - 35, labelY1, 70, 12, juce::Justification::centred);
+    g.drawText("FDBK",   396 - 35, labelY1, 70, 12, juce::Justification::centred);
 
-    // Bottom row labels (below knobs): y = 290 + 40 + 4 = 334
-    int labelY2 = 334;
-    g.drawText("ENV",    310 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("FREEZE", 403 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("TILT",   496 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("MIX",    589 - 40, labelY2, 80, 14, juce::Justification::centred);
+    // Bottom row: y = 318 + 35 + 3 = 356
+    int labelY2 = 356;
+    g.drawText("ENV",    103 - 35, labelY2, 70, 12, juce::Justification::centred);
+    g.drawText("FREEZE", 201 - 35, labelY2, 70, 12, juce::Justification::centred);
+    g.drawText("TILT",   298 - 35, labelY2, 70, 12, juce::Justification::centred);
+    g.drawText("MIX",    396 - 35, labelY2, 70, 12, juce::Justification::centred);
 
     // Draw LED (on/off based on bypass state)
     auto& led = processor.isBypassed() ? ledOff : ledOn;
     if (!led.isNull())
     {
-        // LED position from flat orthographic: (643, 558) centered
-        g.drawImage(led, 626, 541, 34, 34, 0, 0, led.getWidth(), led.getHeight());
+        // LED position: (452, 598)
+        g.drawImage(led, 435, 581, 34, 34, 0, 0, led.getWidth(), led.getHeight());
     }
 }
 
 void GhostDelayEditor::resized()
 {
-    int knobSize = 80;
+    int knobSize = 70;
     int halfKnob = knobSize / 2;
 
-    // Flat orthographic top-down positions from Blender at 900x600
-    // Top row: SPREAD(310,178), DIR(403,178), TIME(496,178), FDBK(589,178)
-    knobSpread->setBounds(310 - halfKnob, 178 - halfKnob, knobSize, knobSize);
-    knobDir->setBounds(403 - halfKnob, 178 - halfKnob, knobSize, knobSize);
-    knobTime->setBounds(496 - halfKnob, 178 - halfKnob, knobSize, knobSize);
-    knobFdbk->setBounds(589 - halfKnob, 178 - halfKnob, knobSize, knobSize);
+    // Tight crop positions at 500x657
+    // Top row: SPREAD(103,201), DIR(201,201), TIME(298,201), FDBK(396,201)
+    knobSpread->setBounds(103 - halfKnob, 201 - halfKnob, knobSize, knobSize);
+    knobDir->setBounds(201 - halfKnob, 201 - halfKnob, knobSize, knobSize);
+    knobTime->setBounds(298 - halfKnob, 201 - halfKnob, knobSize, knobSize);
+    knobFdbk->setBounds(396 - halfKnob, 201 - halfKnob, knobSize, knobSize);
 
-    // Bottom row: ENV(310,290), FREEZE(403,290), TILT(496,290), MIX(589,290)
-    knobEnv->setBounds(310 - halfKnob, 290 - halfKnob, knobSize, knobSize);
-    knobFreeze->setBounds(403 - halfKnob, 290 - halfKnob, knobSize, knobSize);
-    knobTilt->setBounds(496 - halfKnob, 290 - halfKnob, knobSize, knobSize);
-    knobMix->setBounds(589 - halfKnob, 290 - halfKnob, knobSize, knobSize);
+    // Bottom row: ENV(103,318), FREEZE(201,318), TILT(298,318), MIX(396,318)
+    knobEnv->setBounds(103 - halfKnob, 318 - halfKnob, knobSize, knobSize);
+    knobFreeze->setBounds(201 - halfKnob, 318 - halfKnob, knobSize, knobSize);
+    knobTilt->setBounds(298 - halfKnob, 318 - halfKnob, knobSize, knobSize);
+    knobMix->setBounds(396 - halfKnob, 318 - halfKnob, knobSize, knobSize);
 
-    // Ghost renderer — ScreenBacking area: (282, 388, 335x103)
-    ghostRenderer.setBounds(282, 388, 335, 103);
-    ghostRenderer.setSpriteOffset(282, 388);
+    // Ghost renderer — ScreenBacking area: (74, 421, 351x107)
+    ghostRenderer.setBounds(74, 421, 351, 107);
+    ghostRenderer.setSpriteOffset(74, 421);
 
-    // Spectrum display — Display_Screen area: (327, 86, 245x36)
-    spectrumDisplay.setBounds(327, 86, 245, 36);
+    // Spectrum display — Display_Screen area: (115, 94, 269x39)
+    spectrumDisplay.setBounds(115, 94, 269, 39);
 
-    // Bypass button over LED: (643, 558) with padding
-    bypassButton.setBounds(623, 538, 54, 54);
+    // Bypass button over LED: (452, 598) with padding
+    bypassButton.setBounds(432, 578, 54, 54);
 }
