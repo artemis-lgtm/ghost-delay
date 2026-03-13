@@ -9,10 +9,7 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
         BinaryData::background_png, BinaryData::background_pngSize);
 
     // Load LED states
-    ledOn = juce::ImageCache::getFromMemory(
-        BinaryData::led_on_png, BinaryData::led_on_pngSize);
-    ledOff = juce::ImageCache::getFromMemory(
-        BinaryData::led_off_png, BinaryData::led_off_pngSize);
+    // LED images no longer used (bypass removed)
 
     // Create filmstrip knobs (128 frames each, Blender-rendered)
     auto makeKnob = [this](const char* name, const void* data, size_t size)
@@ -52,16 +49,7 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     // Spectrum display
     addAndMakeVisible(spectrumDisplay);
 
-    // Bypass button (invisible, overlays LED position)
-    bypassButton.setButtonText("");
-    bypassButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-    bypassButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
-    bypassButton.onClick = [this]()
-    {
-        processor.setBypassed(!processor.isBypassed());
-        repaint();
-    };
-    addAndMakeVisible(bypassButton);
+    // Bypass removed — users bypass via DAW channel strip
 
     // Timer to feed spectrum data from processor to display
     startTimerHz(30);
@@ -113,10 +101,7 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0x1a, 0x4a, 0x3a)); // match the teal screen color
     g.fillRect(284, 390, 331, 99);
 
-    // ── Paint over the baked-in spectrum from Blender background ─
-    // Display_Screen area: (327, 86, 245x36)
-    g.setColour(juce::Colour(0x0a, 0x2a, 0x2a)); // dark teal for spectrum area
-    g.fillRect(328, 87, 243, 34);
+    // Spectrum screen is baked into background as dark teal — no manual fill needed
 
     // ── Knob labels ─────────────────────────────────────────────
     g.setColour(juce::Colour(0xcc, 0xcc, 0xdd));
@@ -136,13 +121,7 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     g.drawText("TILT",   496 - 40, labelY2, 80, 14, juce::Justification::centred);
     g.drawText("MIX",    589 - 40, labelY2, 80, 14, juce::Justification::centred);
 
-    // Draw LED (on/off based on bypass state)
-    auto& led = processor.isBypassed() ? ledOff : ledOn;
-    if (!led.isNull())
-    {
-        // LED position from flat orthographic: (643, 558) centered
-        g.drawImage(led, 626, 541, 34, 34, 0, 0, led.getWidth(), led.getHeight());
-    }
+    // LED/bypass removed
 }
 
 void GhostDelayEditor::resized()
@@ -168,8 +147,7 @@ void GhostDelayEditor::resized()
     ghostRenderer.setSpriteOffset(282, 388);
 
     // Spectrum display — Display_Screen area: (327, 86, 245x36)
-    spectrumDisplay.setBounds(316, 72, 266, 45);
+    spectrumDisplay.setBounds(323, 77, 254, 35);
 
-    // Bypass button over LED: (643, 558) with padding
-    bypassButton.setBounds(623, 538, 54, 54);
+    // Bypass removed
 }

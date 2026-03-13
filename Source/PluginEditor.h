@@ -21,7 +21,7 @@ private:
     GhostDelayProcessor& processor;
 
     juce::Image background;
-    juce::Image ledOn, ledOff;
+    // LED images removed (bypass handled by DAW)
 
     // 8 filmstrip knobs
     std::unique_ptr<FilmstripKnob> knobTime, knobFdbk, knobMix, knobFreeze;
@@ -37,8 +37,7 @@ private:
     // Spectral analyzer display
     SpectrumDisplay spectrumDisplay;
 
-    // Bypass button (mapped to LED)
-    juce::TextButton bypassButton;
+    // Bypass removed
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GhostDelayEditor)
 };
