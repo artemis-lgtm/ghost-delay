@@ -18,52 +18,47 @@ GhostDelayProcessor::createParameterLayout()
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("time", 1), "TIME",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("feedback", 1), "FDBK",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.4f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("mix", 1), "MIX",
+        juce::ParameterID("decay", 1), "DECAY",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("freeze", 1), "FREEZE",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
+        juce::ParameterID("tone", 1), "TONE",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("tilt", 1), "TILT",
+        juce::ParameterID("rate", 1), "RATE",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("depth", 1), "DEPTH",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.7f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("spread", 1), "SPREAD",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("direction", 1), "DIR",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 1.0f));
-
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("envelope", 1), "ENV",
+        juce::ParameterID("mix", 1), "MIX",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
-
-    // Key-aware harmonic filtering (no visible knob -- host automation only)
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("keyAware", 1), "KEY",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
 
     return { params.begin(), params.end() };
 }
 
 void GhostDelayProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    spectralDelay.prepare(sampleRate, samplesPerBlock);
+    engine.prepare(sampleRate, samplesPerBlock);
 }
 
 void GhostDelayProcessor::releaseResources()
 {
-    spectralDelay.reset();
+    engine.reset();
 }
 
 void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
@@ -74,25 +69,17 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     if (bypassed.load())
         return;
 
-    // Update DSP params from APVTS
-    spectralDelay.setTime(*apvts.getRawParameterValue("time"));
-    spectralDelay.setFeedback(*apvts.getRawParameterValue("feedback"));
-    spectralDelay.setMix(*apvts.getRawParameterValue("mix"));
-    spectralDelay.setFreeze(*apvts.getRawParameterValue("freeze"));
-    spectralDelay.setTilt(*apvts.getRawParameterValue("tilt"));
-    spectralDelay.setSpread(*apvts.getRawParameterValue("spread"));
-    spectralDelay.setDirection(*apvts.getRawParameterValue("direction"));
-    spectralDelay.setEnvelope(*apvts.getRawParameterValue("envelope"));
-    spectralDelay.setKeyAware(*apvts.getRawParameterValue("keyAware"));
+    // Feed parameters from APVTS to engine
+    engine.setTime(*apvts.getRawParameterValue("time"));
+    engine.setFeedback(*apvts.getRawParameterValue("feedback"));
+    engine.setDecay(*apvts.getRawParameterValue("decay"));
+    engine.setTone(*apvts.getRawParameterValue("tone"));
+    engine.setRate(*apvts.getRawParameterValue("rate"));
+    engine.setDepth(*apvts.getRawParameterValue("depth"));
+    engine.setSpread(*apvts.getRawParameterValue("spread"));
+    engine.setMix(*apvts.getRawParameterValue("mix"));
 
-    spectralDelay.process(buffer);
-
-    // Calculate RMS for UI
-    float rms = 0.0f;
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-        rms += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
-    rms /= static_cast<float>(buffer.getNumChannels());
-    rmsLevel.store(rms);
+    engine.process(buffer, getPlayHead());
 }
 
 void GhostDelayProcessor::getStateInformation(juce::MemoryBlock& destData)

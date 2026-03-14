@@ -1,6 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
-#include "SpectralDelay.h"
+#include "GhostEngine.h"
 
 class GhostDelayProcessor : public juce::AudioProcessor
 {
@@ -18,7 +18,7 @@ public:
     const juce::String getName() const override { return "Ghost Delay"; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
-    double getTailLengthSeconds() const override { return 2.0; }
+    double getTailLengthSeconds() const override { return 4.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -32,11 +32,11 @@ public:
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
 
     // For UI
-    float getCurrentRMSLevel() const { return rmsLevel.load(); }
-    void getSpectrum(float* dest, int numBins) const { spectralDelay.getSpectrum(dest, numBins); }
-    SpectralDelay::KeyInfo getDetectedKey() const { return spectralDelay.getDetectedKey(); }
+    float getCurrentRMSLevel() const { return engine.getCurrentRMSLevel(); }
+    float getSweepPosition() const   { return engine.getSweepPosition(); }
+    float getSweepFrequency() const  { return engine.getSweepFrequency(); }
 
-    // Bypass state
+    // Bypass
     bool isBypassed() const { return bypassed.load(); }
     void setBypassed(bool b) { bypassed.store(b); }
 
@@ -44,8 +44,7 @@ private:
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    SpectralDelay spectralDelay;
-    std::atomic<float> rmsLevel { 0.0f };
+    GhostEngine engine;
     std::atomic<bool> bypassed { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GhostDelayProcessor)

@@ -3,9 +3,6 @@
 
 SpectrumDisplay::SpectrumDisplay()
 {
-    barValues.fill(0.0f);
-    barPeaks.fill(0.0f);
-    barTargets.fill(0.0f);
     startTimerHz(30);
 }
 
@@ -14,112 +11,105 @@ SpectrumDisplay::~SpectrumDisplay()
     stopTimer();
 }
 
-void SpectrumDisplay::updateSpectrum(const float* data, int numBins)
+void SpectrumDisplay::setSweepPosition(float pos)
 {
-    // Map input bins to our bar count
-    int step = std::max(1, numBins / NUM_BARS);
-    for (int i = 0; i < NUM_BARS; ++i)
-    {
-        float sum = 0.0f;
-        int start = i * step;
-        int end = std::min(start + step, numBins);
-        for (int j = start; j < end; ++j)
-            sum += data[j];
-        float val = sum / std::max(1, end - start);
+    targetPos = std::clamp(pos, 0.0f, 1.0f);
+}
 
-        // Log scale for better visual response
-        val = std::log10(1.0f + val * 9.0f);
-        barTargets[i] = std::min(1.0f, val);
-    }
+void SpectrumDisplay::setSweepFrequency(float freqHz)
+{
+    displayFreq = freqHz;
+}
+
+void SpectrumDisplay::setAudioLevel(float level)
+{
+    displayLevel = level;
 }
 
 void SpectrumDisplay::timerCallback()
 {
-    // Smooth bar movement
-    for (int i = 0; i < NUM_BARS; ++i)
-    {
-        // Rise fast, fall slow
-        if (barTargets[i] > barValues[i])
-            barValues[i] += (barTargets[i] - barValues[i]) * 0.6f;
-        else
-            barValues[i] += (barTargets[i] - barValues[i]) * 0.15f;
+    // Smooth position for display
+    displayPos += (targetPos - displayPos) * 0.4f;
 
-        // Peak hold with slow decay
-        if (barValues[i] > barPeaks[i])
-            barPeaks[i] = barValues[i];
-        else
-            barPeaks[i] *= 0.97f;
-    }
+    // Trail follows more slowly
+    trailPos += (targetPos - trailPos) * 0.1f;
 
     repaint();
-}
-
-void SpectrumDisplay::setDetectedKey(int rootNote, bool isMinor, float confidence)
-{
-    displayRootNote = rootNote;
-    displayIsMinor = isMinor;
-    displayConfidence = confidence;
 }
 
 void SpectrumDisplay::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
+    float w = bounds.getWidth();
+    float h = bounds.getHeight();
 
-    // Background is baked into the Blender render (matching dark teal)
-    // No fill needed — bars draw directly on top of the background image
-
-    // Reserve right side for key display if active
-    float keyDisplayWidth = (displayRootNote >= 0 && displayConfidence > 0.3f) ? 28.0f : 0.0f;
-    auto barBounds = bounds.withTrimmedRight(keyDisplayWidth);
-    float barWidth = barBounds.getWidth() / NUM_BARS;
-    float gap = 1.0f; // 1px gap between bars
-
-    for (int i = 0; i < NUM_BARS; ++i)
+    // ── Background glow trail ───────────────────────────────
+    // Draw a soft trail showing where the sweep has been
     {
-        float x = barBounds.getX() + i * barWidth;
-        float barH = barValues[i] * barBounds.getHeight();
+        float trailX = bounds.getX() + trailPos * w;
+        float trailW = std::max(w * 0.15f, 20.0f);
 
-        // Bar color: teal gradient, brighter at top
-        float intensity = 0.4f + barValues[i] * 0.6f;
-        auto barColor = juce::Colour::fromFloatRGBA(
-            0.0f,
-            intensity * 0.7f,
-            intensity * 0.75f,
-            0.85f);
+        juce::ColourGradient trail(
+            juce::Colour::fromFloatRGBA(0.0f, 0.5f, 0.55f, 0.15f),
+            trailX, bounds.getY(),
+            juce::Colour::fromFloatRGBA(0.0f, 0.3f, 0.35f, 0.0f),
+            trailX + trailW * 0.5f, bounds.getY(),
+            true);  // radial = true? No, linear is fine for a sweep
 
-        // Draw bar from bottom
-        g.setColour(barColor);
-        g.fillRect(x + gap * 0.5f,
-                   barBounds.getBottom() - barH,
-                   barWidth - gap,
-                   barH);
-
-        // Peak indicator (thin bright line)
-        if (barPeaks[i] > 0.02f)
-        {
-            float peakY = barBounds.getBottom() - barPeaks[i] * barBounds.getHeight();
-            g.setColour(juce::Colour::fromFloatRGBA(0.2f, 0.9f, 0.95f, 0.9f));
-            g.fillRect(x + gap * 0.5f, peakY, barWidth - gap, 1.0f);
-        }
+        // Soft rectangular glow
+        g.setColour(juce::Colour::fromFloatRGBA(0.0f, 0.4f, 0.45f, 0.12f));
+        float halfTrail = trailW * 0.5f;
+        g.fillRect(trailX - halfTrail, bounds.getY(), trailW, h);
     }
 
-    // ── Key indicator (right side of screen) ─────────────────────
-    if (displayRootNote >= 0 && displayConfidence > 0.3f)
+    // ── Main sweep indicator ────────────────────────────────
     {
-        static const char* noteNames[12] = {
-            "C", "C#", "D", "D#", "E", "F",
-            "F#", "G", "G#", "A", "A#", "B"
-        };
+        float sweepX = bounds.getX() + displayPos * w;
+        float intensity = 0.5f + std::min(displayLevel * 3.0f, 0.5f);
 
-        juce::String keyText = juce::String(noteNames[displayRootNote]);
-        keyText += displayIsMinor ? "m" : "";
+        // Outer glow (wider, dimmer)
+        float glowW = std::max(w * 0.08f, 12.0f);
+        g.setColour(juce::Colour::fromFloatRGBA(0.0f, 0.7f, 0.8f, intensity * 0.3f));
+        g.fillRect(sweepX - glowW * 0.5f, bounds.getY(), glowW, h);
 
-        // Bright teal text, opacity scales with confidence
-        float alpha = 0.5f + displayConfidence * 0.5f;
-        g.setColour(juce::Colour::fromFloatRGBA(0.0f, 0.9f, 1.0f, alpha));
-        g.setFont(juce::Font(11.0f).boldened());
+        // Inner bright bar
+        float barW = std::max(w * 0.025f, 4.0f);
+        g.setColour(juce::Colour::fromFloatRGBA(0.1f, 0.95f, 1.0f, intensity * 0.85f));
+        g.fillRect(sweepX - barW * 0.5f, bounds.getY(), barW, h);
 
-        auto keyArea = bounds.removeFromRight(keyDisplayWidth);
-        g.drawText(keyText, keyArea, juce::Justification::centred, false);
+        // Bright center line
+        g.setColour(juce::Colour::fromFloatRGBA(0.5f, 1.0f, 1.0f, intensity));
+        g.fillRect(sweepX - 0.5f, bounds.getY(), 1.0f, h);
     }
+
+    // ── Frequency label ─────────────────────────────────────
+    {
+        int freqInt = (int)(displayFreq + 0.5f);
+        juce::String freqText = juce::String(freqInt) + " Hz";
+
+        // Position text near the sweep bar but clamped to screen
+        float textX = bounds.getX() + displayPos * w;
+        float textW = 50.0f;
+
+        // Clamp so text doesn't go off-screen
+        if (textX + textW * 0.5f > bounds.getRight() - 5.0f)
+            textX = bounds.getRight() - textW - 5.0f;
+        if (textX - textW * 0.5f < bounds.getX() + 5.0f)
+            textX = bounds.getX() + textW * 0.5f + 5.0f;
+
+        g.setColour(juce::Colour::fromFloatRGBA(0.0f, 0.85f, 0.95f, 0.7f));
+        g.setFont(juce::Font(9.0f));
+        g.drawText(freqText,
+                   (int)(textX - textW * 0.5f), (int)bounds.getY() + 1,
+                   (int)textW, 12,
+                   juce::Justification::centred, false);
+    }
+
+    // ── Scale markers (60 Hz and 900 Hz at edges) ───────────
+    g.setColour(juce::Colour::fromFloatRGBA(0.3f, 0.5f, 0.55f, 0.3f));
+    g.setFont(juce::Font(8.0f));
+    g.drawText("60", (int)bounds.getX() + 2, (int)(bounds.getBottom() - 11), 20, 10,
+               juce::Justification::centredLeft, false);
+    g.drawText("900", (int)(bounds.getRight() - 25), (int)(bounds.getBottom() - 11), 23, 10,
+               juce::Justification::centredRight, false);
 }

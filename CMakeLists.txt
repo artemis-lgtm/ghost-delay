@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(GhostDelay VERSION 1.0.0)
+project(GhostDelay VERSION 2.0.0)
 
 # Find JUCE (expects JUCE installed or fetched)
 find_package(JUCE CONFIG QUIET)
@@ -33,12 +33,12 @@ target_sources(GhostDelay
         Source/PluginProcessor.h
         Source/PluginEditor.cpp
         Source/PluginEditor.h
+        Source/GhostEngine.cpp
+        Source/GhostEngine.h
         Source/GhostRenderer.cpp
         Source/GhostRenderer.h
         Source/FilmstripKnob.cpp
         Source/FilmstripKnob.h
-        Source/SpectralDelay.cpp
-        Source/SpectralDelay.h
         Source/SpectrumDisplay.cpp
         Source/SpectrumDisplay.h
 )
