@@ -1,65 +1,102 @@
 #include "GhostEngine.h"
 #include <algorithm>
 
-// Static constexpr definitions
-constexpr float GhostEngine::delaySubs[NUM_SUBS];
-
 GhostEngine::GhostEngine() {}
 
 void GhostEngine::prepare(double sr, int blockSize)
 {
     sampleRate = sr;
 
-    // Clear delay lines
-    delayL.fill(0.0f);
-    delayR.fill(0.0f);
-    delayWriteL = 0;
-    delayWriteR = 0;
-    smoothDelayL = 0.0f;
-    smoothDelayR = 0.0f;
+    // Scale all delay lengths to current sample rate
+    float srScale = (float)(sr / 44100.0);
 
-    // Reverb
-    reverb.setSampleRate(sr);
-    reverb.reset();
+    // FDN delay lines
+    for (int i = 0; i < FDN_SIZE; ++i)
+    {
+        int len = std::clamp((int)(baseLengths[i] * srScale), 4, MAX_FDN_DELAY - 1);
+        fdnL[i].length = len;
+        fdnR[i].length = len;
+        fdnL[i].clear();
+        fdnR[i].clear();
+        fdnLPL[i].reset();
+        fdnLPR[i].reset();
+    }
 
-    // SVFs (bandpass + lowpass)
-    svfL.reset();
-    svfR.reset();
-    lpfL.reset();
-    lpfR.reset();
+    // Input diffusers
+    for (int i = 0; i < 2; ++i)
+    {
+        int len = std::clamp((int)(diffLengths[i] * srScale), 4, 4095);
+        diffuserL[i].length = len;
+        diffuserR[i].length = len;
+        diffuserL[i].clear();
+        diffuserR[i].clear();
+    }
 
-    // DC-blocking HP at 30 Hz (1-pole)
-    float hpFreq = 30.0f;
+    // Modulated allpasses inside FDN
+    for (int i = 0; i < FDN_SIZE; ++i)
+    {
+        int len = std::clamp((int)(modAPLengths[i] * srScale), 4, 4095);
+        modAPL[i].length = len;
+        modAPR[i].length = len;
+        modAPL[i].clear();
+        modAPR[i].clear();
+        // Stagger phases for decorrelation
+        modAPL[i].phase = (float)i * 0.25f;
+        modAPR[i].phase = (float)i * 0.25f + 0.125f;
+    }
+
+    // Comb filters
+    combL.clear();
+    combR.clear();
+
+    // DC blocker
+    float hpFreq = 20.0f;
     hpCoeff = 1.0f - (juce::MathConstants<float>::twoPi * hpFreq / (float)sr);
     hpCoeff = std::clamp(hpCoeff, 0.9f, 0.9999f);
-    hpStateL = 0.0f;
-    hpStateR = 0.0f;
+    hpStateL = hpStateR = 0.0f;
 
-    // LFO
     lfoPhase = 0.0;
 
-    // Wet buffer
     wetBuffer.setSize(2, blockSize);
     wetBuffer.clear();
 }
 
 void GhostEngine::reset()
 {
-    delayL.fill(0.0f);
-    delayR.fill(0.0f);
-    delayWriteL = 0;
-    delayWriteR = 0;
-    smoothDelayL = 0.0f;
-    smoothDelayR = 0.0f;
-
-    reverb.reset();
-    svfL.reset();
-    svfR.reset();
-    lpfL.reset();
-    lpfR.reset();
-    hpStateL = 0.0f;
-    hpStateR = 0.0f;
+    for (int i = 0; i < FDN_SIZE; ++i)
+    {
+        fdnL[i].clear();  fdnR[i].clear();
+        fdnLPL[i].reset(); fdnLPR[i].reset();
+        modAPL[i].clear(); modAPR[i].clear();
+    }
+    for (int i = 0; i < 2; ++i)
+    {
+        diffuserL[i].clear();
+        diffuserR[i].clear();
+    }
+    combL.clear();
+    combR.clear();
+    hpStateL = hpStateR = 0.0f;
     lfoPhase = 0.0;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Update FDN delay lengths based on SIZE parameter
+// ═════════════════════════════════════════════════════════════════
+void GhostEngine::updateFDNDelayLengths()
+{
+    float srScale = (float)(sampleRate / 44100.0);
+    // SIZE scales delay lengths: 0.2x (small room) to 3.0x (massive hall)
+    float sizeScale = 0.2f + size * 2.8f;
+
+    for (int i = 0; i < FDN_SIZE; ++i)
+    {
+        int newLen = std::clamp((int)(baseLengths[i] * srScale * sizeScale), 4, MAX_FDN_DELAY - 1);
+        // Don't resize mid-stream (causes glitches), just adjust modulation
+        // Actually update — the write positions wrap naturally
+        fdnL[i].length = newLen;
+        fdnR[i].length = newLen;
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -72,7 +109,7 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = std::min(buffer.getNumChannels(), 2);
 
-    // ── Read host transport ─────────────────────────────────
+    // Read host transport
     hasPPQ = false;
     if (playHead != nullptr)
     {
@@ -80,9 +117,7 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         {
             if (auto bpm = pos->getBpm())
                 hostBPM = std::max(*bpm, 20.0);
-
             hostPlaying = pos->getIsPlaying();
-
             if (auto ppq = pos->getPpqPosition())
             {
                 ppqPosition = *ppq;
@@ -91,149 +126,153 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Ensure wet buffer is large enough ───────────────────
     if (wetBuffer.getNumSamples() < numSamples)
         wetBuffer.setSize(2, numSamples, false, false, true);
     wetBuffer.clear();
 
-    // ── Update reverb parameters ────────────────────────────
-    updateReverbParams();
+    // Update FDN sizes
+    updateFDNDelayLengths();
 
-    // ── Target delay times ──────────────────────────────────
-    float targetDelayL = getDelayTimeSamples(0);
-    float targetDelayR = getDelayTimeSamples(1);
+    // ── Derived parameters ──────────────────────────────────
 
-    // Init smoothed delay on first call
-    if (smoothDelayL < 1.0f) smoothDelayL = targetDelayL;
-    if (smoothDelayR < 1.0f) smoothDelayR = targetDelayR;
+    // DECAY → feedback gain (0.0 → 0.98)
+    float fbGain = decay * 0.98f;
 
-    // ── Feedback gain (quadratic curve, capped at 0.95) ─────
-    float fbk = feedback * feedback * 0.95f;
+    // TONE → LP coefficient for feedback loop
+    // 0 = very dark (coeff ~0.05), 1 = bright (coeff ~0.95)
+    float lpCoeff = 0.05f + fdnTone * 0.90f;
 
-    // ── Step 1: Delay processing (per-sample) ───────────────
+    // DIFF → allpass coefficient (0.1 low diffusion → 0.85 high diffusion)
+    float apCoeff = 0.1f + diff * 0.75f;
+
+    // Internal modulation for lushness (subtle pitch wobble in FDN)
+    // Modulation depth scales with size for bigger = more lush
+    float internalModDepth = 2.0f + size * 12.0f;    // 2–14 samples of wobble
+    float internalModRate  = 0.3f + size * 0.7f;      // 0.3–1.0 Hz (slow, lush)
+
+    // ── ENIGMA modulation params ────────────────────────────
+    // RATE: LFO speed for comb sweep (0.05 Hz → 6 Hz)
+    float combLfoHz = 0.05f + rate * 5.95f;
+    double lfoInc = (double)combLfoHz / sampleRate;
+
+    // NOTCH: base comb delay (2ms → 30ms = 20 Hz → 333 Hz fundamental)
+    float combDelayMs = 2.0f + notch * 28.0f;
+    float combDelaySamples = combDelayMs * 0.001f * (float)sampleRate;
+    combDelaySamples = std::clamp(combDelaySamples, 2.0f, (float)(MAX_COMB_DELAY - 2));
+
+    // DEPTH: comb feedback + blend intensity
+    float combFeedback = depth * 0.85f;  // 0 → 0.85
+
+    // Sweep range: modulate comb delay by +/- 40%
+    float combSweepRange = combDelaySamples * 0.4f;
+
+    // Track for UI
+    float lastFreq = 200.0f;
+
+    // ═══════════════════════════════════════════════════════════
+    // PER-SAMPLE PROCESSING
+    // ═══════════════════════════════════════════════════════════
     for (int s = 0; s < numSamples; ++s)
     {
-        // Smooth delay time (slew to avoid clicks)
-        smoothDelayL += (targetDelayL - smoothDelayL) * 0.0005f;
-        smoothDelayR += (targetDelayR - smoothDelayR) * 0.0005f;
-
-        // Left channel
+        // Read input (mono → duplicate to both channels)
         float inL = (numChannels > 0) ? buffer.getSample(0, s) : 0.0f;
-        float delayedL = readDelay(delayL.data(), delayWriteL, smoothDelayL);
-        delayL[delayWriteL] = std::tanh(inL + delayedL * fbk);
-        delayWriteL = (delayWriteL + 1) % MAX_DELAY_SAMPLES;
-        wetBuffer.setSample(0, s, delayedL);
+        float inR = (numChannels > 1) ? buffer.getSample(1, s) : inL;
 
-        // Right channel (use mono input if only 1 channel)
+        // ── Step 1: Input diffusion (smears transients) ─────
+        float diffL = inL;
+        float diffR = inR;
+        for (int d = 0; d < 2; ++d)
         {
-            float inR = (numChannels > 1) ? buffer.getSample(1, s) : inL;
-            float delayedR = readDelay(delayR.data(), delayWriteR, smoothDelayR);
-            delayR[delayWriteR] = std::tanh(inR + delayedR * fbk);
-            delayWriteR = (delayWriteR + 1) % MAX_DELAY_SAMPLES;
-            wetBuffer.setSample(1, s, delayedR);
-        }
-    }
-
-    // ── Step 2: Reverb (block-based, always stereo) ─────────
-    reverb.processStereo(wetBuffer.getWritePointer(0),
-                         wetBuffer.getWritePointer(1),
-                         numSamples);
-
-    // ── Step 3: Subtle tape saturation on reverb output ─────
-    for (int ch = 0; ch < 2; ++ch)
-    {
-        auto* wet = wetBuffer.getWritePointer(ch);
-        for (int s = 0; s < numSamples; ++s)
-            wet[s] = std::tanh(wet[s] * 1.15f) / 1.15f;
-    }
-
-    // ── Step 3.5: Global low-pass filter (TONE) ─────────────
-    // TONE controls wet signal LP cutoff: 200 Hz (fully dark) → 2000 Hz (less dark)
-    // Never fully bright — everything stays submerged
-    float lpCutoff = 200.0f + tone * 1800.0f;   // 200 Hz → 2000 Hz
-    float lpQ = 0.707f;   // Butterworth-ish, no resonance — smooth rolloff
-
-    for (int s = 0; s < numSamples; ++s)
-    {
-        float wetL = wetBuffer.getSample(0, s);
-        float wetR = wetBuffer.getSample(1, s);
-        wetBuffer.setSample(0, s, lpfL.processLowpass(wetL, lpCutoff, lpQ, sampleRate));
-        wetBuffer.setSample(1, s, lpfR.processLowpass(wetR, lpCutoff, lpQ, sampleRate));
-    }
-
-    // ── Step 4: Animated bandpass sweep (per-sample) ────────
-    // Underwater sweep range: 100 Hz to 400 Hz (deep, murky)
-    constexpr float FREQ_LOW  = 100.0f;
-    constexpr float FREQ_HIGH = 400.0f;
-
-    // Q: gentle resonance — enough to hear the sweep, not piercing
-    // Wider Q than before since the LP already darkens everything
-    float q = 0.7f + tone * tone * 3.0f;   // 0.7 → 3.7
-
-    // Sweep rate
-    float sweepHz = getSweepRateHz();
-    double lfoInc  = (double)sweepHz / sampleRate;
-
-    // PPQ-locked phase (when available)
-    bool usePPQ = hasPPQ && hostPlaying && hostBPM > 20.0;
-    double sweepPeriodBeats = getSweepPeriodBeats();
-
-    // Per-sample tracking for UI
-    float lastFreqL = FREQ_LOW;
-
-    for (int s = 0; s < numSamples; ++s)
-    {
-        // ── LFO phase ───────────────────────────────────
-        double currentPhase;
-        if (usePPQ)
-        {
-            double sampleBeatOffset = (double)s * (hostBPM / (60.0 * sampleRate));
-            double currentBeat = ppqPosition + sampleBeatOffset;
-            currentPhase = std::fmod(currentBeat / sweepPeriodBeats, 1.0);
-            if (currentPhase < 0.0) currentPhase += 1.0;
-        }
-        else
-        {
-            currentPhase = lfoPhase;
-            lfoPhase += lfoInc;
-            if (lfoPhase >= 1.0) lfoPhase -= 1.0;
+            diffL = diffuserL[d].process(diffL, apCoeff);
+            diffR = diffuserR[d].process(diffR, apCoeff);
         }
 
-        // Sine LFO → 0–1 range
-        float lfoVal  = (float)(std::sin(currentPhase * juce::MathConstants<double>::twoPi));
-        float lfoNorm = (lfoVal + 1.0f) * 0.5f;
+        // ── Step 2: FDN Reverb ──────────────────────────────
+        // Read from all 4 delay lines
+        float readL[FDN_SIZE], readR[FDN_SIZE];
+        for (int i = 0; i < FDN_SIZE; ++i)
+        {
+            readL[i] = fdnL[i].read();
+            readR[i] = fdnR[i].read();
+        }
 
-        // ── Center frequencies (L and R with spread offset) ─
-        float centerL = FREQ_LOW + (FREQ_HIGH - FREQ_LOW) * lfoNorm;
+        // Hadamard-like mixing matrix (energy-preserving)
+        // Using a simple rotation: each output = sum of all inputs with signs
+        float mixedL[FDN_SIZE], mixedR[FDN_SIZE];
+        mixedL[0] = ( readL[0] + readL[1] + readL[2] + readL[3]) * 0.5f;
+        mixedL[1] = ( readL[0] - readL[1] + readL[2] - readL[3]) * 0.5f;
+        mixedL[2] = ( readL[0] + readL[1] - readL[2] - readL[3]) * 0.5f;
+        mixedL[3] = ( readL[0] - readL[1] - readL[2] + readL[3]) * 0.5f;
 
-        // R channel: phase offset from SPREAD (up to 180°)
-        double phaseR = currentPhase + (double)spread * 0.5;
-        if (phaseR >= 1.0) phaseR -= 1.0;
-        float lfoNormR = ((float)std::sin(phaseR * juce::MathConstants<double>::twoPi) + 1.0f) * 0.5f;
-        float centerR = FREQ_LOW + (FREQ_HIGH - FREQ_LOW) * lfoNormR;
+        mixedR[0] = ( readR[0] + readR[1] + readR[2] + readR[3]) * 0.5f;
+        mixedR[1] = ( readR[0] - readR[1] + readR[2] - readR[3]) * 0.5f;
+        mixedR[2] = ( readR[0] + readR[1] - readR[2] - readR[3]) * 0.5f;
+        mixedR[3] = ( readR[0] - readR[1] - readR[2] + readR[3]) * 0.5f;
 
-        lastFreqL = centerL;
+        // Apply feedback gain, tone filtering, modulated allpass, then write back
+        for (int i = 0; i < FDN_SIZE; ++i)
+        {
+            // Feedback gain
+            float fbL = mixedL[i] * fbGain;
+            float fbR = mixedR[i] * fbGain;
 
-        // ── Apply bandpass and blend with depth ─────────
+            // Tone: one-pole LP in feedback loop (each repeat gets darker)
+            fbL = fdnLPL[i].process(fbL, lpCoeff);
+            fbR = fdnLPR[i].process(fbR, lpCoeff);
+
+            // Modulated allpass for lush detuning (Valhalla's secret sauce)
+            fbL = modAPL[i].process(fbL, apCoeff * 0.5f, internalModDepth, internalModRate, sampleRate);
+            fbR = modAPR[i].process(fbR, apCoeff * 0.5f, internalModDepth, internalModRate, sampleRate);
+
+            // Soft clip to prevent runaway
+            fbL = std::tanh(fbL);
+            fbR = std::tanh(fbR);
+
+            // Add diffused input and write to delay line
+            float inputScale = (i == 0) ? 1.0f : 0.0f; // Only inject into first tap
+            fdnL[i].write(fbL + diffL * inputScale);
+            fdnR[i].write(fbR + diffR * inputScale);
+        }
+
+        // Sum FDN outputs for reverb signal
+        float reverbL = 0.0f, reverbR = 0.0f;
+        for (int i = 0; i < FDN_SIZE; ++i)
+        {
+            reverbL += readL[i];
+            reverbR += readR[i];
+        }
+        reverbL *= 0.35f;  // Scale to avoid clipping
+        reverbR *= 0.35f;
+
+        // ── Step 3: Enigma-style modulated comb filter ──────
+        // LFO modulates the comb delay time
+        float lfoVal = (float)std::sin(lfoPhase * juce::MathConstants<double>::twoPi);
+        lfoPhase += lfoInc;
+        if (lfoPhase >= 1.0) lfoPhase -= 1.0;
+
+        float modulatedDelay = combDelaySamples + lfoVal * combSweepRange;
+        modulatedDelay = std::clamp(modulatedDelay, 2.0f, (float)(MAX_COMB_DELAY - 2));
+
+        // Track frequency for UI
+        lastFreq = (float)sampleRate / modulatedDelay;
+
         if (depth > 0.001f)
         {
-            // Left
-            float wetL = wetBuffer.getSample(0, s);
-            float bpL  = svfL.processBandpass(wetL, centerL, q, sampleRate);
-            bpL *= (1.0f + q * 0.5f);   // Compensate for BP energy loss
-            wetBuffer.setSample(0, s, wetL * (1.0f - depth) + bpL * depth);
+            // Apply comb to reverb signal
+            float combOutL = combL.process(reverbL, modulatedDelay, combFeedback);
+            float combOutR = combR.process(reverbR, modulatedDelay + 3.0f, combFeedback); // Slight R offset for stereo
 
-            // Right
-            {
-                float wetR = wetBuffer.getSample(1, s);
-                float bpR  = svfR.processBandpass(wetR, centerR, q, sampleRate);
-                bpR *= (1.0f + q * 0.5f);
-                wetBuffer.setSample(1, s, wetR * (1.0f - depth) + bpR * depth);
-            }
+            // Blend: depth controls how much comb vs clean reverb
+            reverbL = reverbL * (1.0f - depth) + combOutL * depth;
+            reverbR = reverbR * (1.0f - depth) + combOutR * depth;
         }
+
+        // ── Step 4: Write to wet buffer ─────────────────────
+        wetBuffer.setSample(0, s, reverbL);
+        wetBuffer.setSample(1, s, reverbR);
     }
 
-    // ── Step 5: Mix dry/wet + DC-blocking HP ────────────────
+    // ── Step 5: Mix dry/wet + DC blocking ───────────────────
     const int outChannels = buffer.getNumChannels();
     const int mixChannels = std::min(outChannels, 2);
 
@@ -251,7 +290,7 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         {
             float mixed = dry[s] * (1.0f - mix) + wet[s] * mix;
 
-            // DC-blocking high-pass (1-pole)
+            // DC blocking
             float hpOut = mixed - hpState;
             hpState = mixed - hpCoeff * hpOut;
             out[s] = hpOut;
@@ -260,92 +299,10 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Update UI atomics ───────────────────────────────────
+    // Update UI
     rms = std::sqrt(rms / (float)(numSamples * std::max(numChannels, 1)));
     rmsLevel.store(rms);
-    sweepFreq.store(lastFreqL);
-    sweepPos.store((lastFreqL - FREQ_LOW) / (FREQ_HIGH - FREQ_LOW));
-}
-
-// ═════════════════════════════════════════════════════════════════
-// Delay time calculation
-// ═════════════════════════════════════════════════════════════════
-float GhostEngine::getDelayTimeSamples(int channel) const
-{
-    float samples;
-
-    if (hostBPM > 20.0)
-    {
-        int idx = juce::jlimit(0, NUM_SUBS - 1, (int)(time * (float)NUM_SUBS));
-        float beats = delaySubs[idx];
-        double secondsPerBeat = 60.0 / hostBPM;
-        samples = (float)(beats * secondsPerBeat * sampleRate);
-    }
-    else
-    {
-        float ms = 20.0f * std::pow(100.0f, time);
-        samples = ms * 0.001f * (float)sampleRate;
-    }
-
-    if (channel == 1)
-        samples *= (1.0f + spread * 0.02f);
-
-    return std::clamp(samples, 1.0f, (float)(MAX_DELAY_SAMPLES - 1));
-}
-
-// ═════════════════════════════════════════════════════════════════
-// Sweep rate calculation — SLOWER for underwater feel
-// ═════════════════════════════════════════════════════════════════
-double GhostEngine::getSweepPeriodBeats() const
-{
-    // Slower range: 64 beats (16 bars, glacial) → 2 beats (1/2 note, moderate)
-    // rate=0 → 64 beats, rate=0.5 → ~11 beats, rate=1 → 2 beats
-    return 64.0 * std::pow(0.03125, (double)rate);
-}
-
-float GhostEngine::getSweepRateHz() const
-{
-    double periodBeats = getSweepPeriodBeats();
-
-    if (hostBPM > 20.0)
-    {
-        double secondsPerBeat = 60.0 / hostBPM;
-        return (float)(1.0 / (periodBeats * secondsPerBeat));
-    }
-    else
-    {
-        // Free-running: 0.02 Hz → 4 Hz (slower range)
-        return (float)(0.02 * std::pow(200.0, (double)rate));
-    }
-}
-
-// ═════════════════════════════════════════════════════════════════
-// Reverb parameter mapping — HEAVIER damping for underwater
-// ═════════════════════════════════════════════════════════════════
-void GhostEngine::updateReverbParams()
-{
-    juce::Reverb::Parameters params;
-    params.roomSize   = 0.4f + decay * 0.59f;            // 0.4 → 0.99 (larger base room)
-    params.damping    = 0.7f + (1.0f - tone) * 0.29f;    // 0.7 → 0.99 (always heavy damping)
-    params.wetLevel   = 1.0f;
-    params.dryLevel   = 0.0f;
-    params.width      = 0.3f + spread * 0.7f;
-    params.freezeMode = 0.0f;
-    reverb.setParameters(params);
-}
-
-// ═════════════════════════════════════════════════════════════════
-// Delay line read with linear interpolation
-// ═════════════════════════════════════════════════════════════════
-float GhostEngine::readDelay(const float* buf, int writePos, float delaySamples)
-{
-    float readPos = (float)writePos - delaySamples;
-    if (readPos < 0.0f) readPos += (float)MAX_DELAY_SAMPLES;
-
-    int idx0 = (int)readPos;
-    int idx1 = (idx0 + 1) % MAX_DELAY_SAMPLES;
-    float frac = readPos - (float)idx0;
-
-    return buf[idx0 % MAX_DELAY_SAMPLES] * (1.0f - frac)
-         + buf[idx1] * frac;
+    sweepFreq.store(lastFreq);
+    float normPos = std::clamp((lastFreq - 30.0f) / 470.0f, 0.0f, 1.0f);
+    sweepPos.store(normPos);
 }

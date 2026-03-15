@@ -95,18 +95,18 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xcc, 0xcc, 0xdd));
     g.setFont(juce::Font(11.0f).boldened());
 
-    // Top row labels (below knobs)
+    // Top row labels — REVERB
     int labelY1 = 221;
-    g.drawText("TIME",   95 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("FDBK",  188 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("DECAY", 281 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("TONE",  374 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("SIZE",    95 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("DECAY",  188 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("TONE",   281 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("DIFF",   374 - 40, labelY1, 80, 14, juce::Justification::centred);
 
-    // Bottom row labels
+    // Bottom row labels — MODULATION
     int labelY2 = 333;
     g.drawText("RATE",    95 - 40, labelY2, 80, 14, juce::Justification::centred);
     g.drawText("DEPTH",  188 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("SPREAD", 281 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("NOTCH",  281 - 40, labelY2, 80, 14, juce::Justification::centred);
     g.drawText("MIX",    374 - 40, labelY2, 80, 14, juce::Justification::centred);
 }
 
