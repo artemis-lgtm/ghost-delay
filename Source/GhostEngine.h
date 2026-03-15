@@ -6,19 +6,24 @@
 #include <atomic>
 
 /**
- * Ghost Delay v3.1 — Valhalla-quality FDN Reverb + Enigma Modulation
+ * Ghost Delay v3.2 — Valhalla FDN Reverb + Enigma Notch Processor
  *
- * Architecture based on:
- *   - Stautner/Puckette (1982): FDN reverb with rotation matrix
- *   - Jot (1992): Frequency-dependent decay via absorption filters
- *   - Sean Costello / Valhalla DSP: Modulated allpasses, scaled mod depth,
- *     no-net-pitch-change modulation, dense input diffusion
- *   - Julius O. Smith: Mutually prime delay lengths, Hadamard mixing
+ * Architecture:
+ *   TOP ROW = Reverb (Valhalla-inspired 8-channel FDN)
+ *   BOTTOM ROW = Enigma-style notch processor
+ *
+ * The Enigma section is based on deep analysis of the Waves Enigma
+ * manual and architecture:
+ *   - Multi-stage allpass chain (6 stages = 3 notch pairs)
+ *   - LFO-modulated allpass delays (sweep notches through spectrum)
+ *   - Feedback path through the allpass chain (creates resonant peaks)
+ *   - Feedback path filtered for tonal shaping
+ *   - Stereo offset between L/R chains for natural imaging
  *
  * Signal chain:
- *   Input → 4x Cascaded Input Diffusers (modulated) →
- *   8-channel FDN (Hadamard matrix, per-line LP, modulated allpasses) →
- *   L/R output taps → Enigma comb modulation → Mix → Output
+ *   Input → Input Diffusers → 8-ch FDN Reverb →
+ *   Enigma Notch Processor (6-stage allpass with feedback) →
+ *   Mix with dry → Output
  *
  * Top row:  SIZE, DECAY, TONE, DIFF
  * Bottom:   RATE, DEPTH, NOTCH, MIX
@@ -34,7 +39,7 @@ public:
                  juce::AudioPlayHead* playHead);
     void reset();
 
-    // Parameter setters (mapped from APVTS IDs)
+    // Parameter setters
     void setTime(float v)     { size = v; }
     void setFeedback(float v) { decay = v; }
     void setDecay(float v)    { fdnTone = v; }
@@ -51,10 +56,10 @@ public:
 
 private:
     // ═══════════════════════════════════════════════════════════
-    // 8-CHANNEL FDN (single network, stereo I/O)
+    // 8-CHANNEL FDN REVERB
     // ═══════════════════════════════════════════════════════════
     static constexpr int FDN_ORDER = 8;
-    static constexpr int MAX_DELAY = 12000;  // ~250ms at 48kHz
+    static constexpr int MAX_DELAY = 12000;
 
     struct DelayLine
     {
@@ -63,24 +68,15 @@ private:
         void clear() { buf.fill(0.0f); wp = 0; }
         void write(float s) { buf[wp] = s; wp = (wp + 1) % len; }
         float read() const { return buf[wp]; }
-        float readInterp(float delay) const
-        {
-            float rp = (float)wp - delay;
-            if (rp < 0.0f) rp += (float)len;
-            int i0 = (int)rp, i1 = (i0 + 1) % len;
-            float f = rp - (float)i0;
-            return buf[i0 % len] * (1.0f - f) + buf[i1] * f;
-        }
     };
 
     std::array<DelayLine, FDN_ORDER> fdn;
 
-    // Per-line absorption filter (one-pole LP in feedback)
     struct AbsFilter { float s = 0.0f; void reset() { s = 0.0f; } };
     std::array<AbsFilter, FDN_ORDER> absF;
 
     // ═══════════════════════════════════════════════════════════
-    // INPUT DIFFUSERS (4 cascaded, modulated allpasses)
+    // INPUT DIFFUSERS (4 cascaded modulated allpasses)
     // ═══════════════════════════════════════════════════════════
     static constexpr int NUM_DIFFUSERS = 4;
     static constexpr int MAX_AP = 4096;
@@ -94,7 +90,6 @@ private:
 
         float process(float in, float coeff, float modSamples, float modHz, double sr)
         {
-            // Multi-rate LFO for no-net-pitch-change
             phase += (float)(modHz / sr);
             if (phase >= 1.0f) phase -= 1.0f;
             float mod = modSamples * std::sin(phase * juce::MathConstants<float>::twoPi);
@@ -115,36 +110,68 @@ private:
         }
     };
 
-    // Input diffusers: 2 per channel (L/R) × 2 stages = 4 total per channel
     std::array<ModAllpass, NUM_DIFFUSERS> diffL, diffR;
-
-    // FDN internal modulated allpasses (one per delay line)
     std::array<ModAllpass, FDN_ORDER> fdnAP;
 
     // ═══════════════════════════════════════════════════════════
-    // ENIGMA COMB FILTER
+    // ENIGMA NOTCH PROCESSOR
+    // 6-stage allpass chain with feedback (like Waves Enigma)
+    // Creates 3 notch pairs that sweep through the spectrum
     // ═══════════════════════════════════════════════════════════
-    static constexpr int MAX_COMB = 4096;
-    struct Comb
+    static constexpr int ENIGMA_STAGES = 6;
+    static constexpr int MAX_ENIGMA_AP = 2048;
+
+    struct EnigmaAllpass
     {
-        std::array<float, MAX_COMB> buf {};
+        std::array<float, MAX_ENIGMA_AP> buf {};
         int wp = 0;
         void clear() { buf.fill(0.0f); wp = 0; }
-        float process(float in, float delay, float fb)
+
+        // Process with fractional delay (interpolated read)
+        float process(float in, float coeff, float delaySamples)
         {
-            float rp = (float)wp - delay;
-            if (rp < 0.0f) rp += (float)MAX_COMB;
-            int i0 = (int)rp, i1 = (i0 + 1) % MAX_COMB;
-            float f = rp - (float)i0;
-            float del = buf[i0] * (1.0f - f) + buf[i1] * f;
-            buf[wp] = in + del * fb;
-            wp = (wp + 1) % MAX_COMB;
-            return del;
+            delaySamples = std::clamp(delaySamples, 1.0f, (float)(MAX_ENIGMA_AP - 2));
+
+            float rp = (float)wp - delaySamples;
+            if (rp < 0.0f) rp += (float)MAX_ENIGMA_AP;
+            int i0 = (int)rp;
+            int i1 = (i0 + 1) % MAX_ENIGMA_AP;
+            float frac = rp - (float)i0;
+            float delayed = buf[i0 % MAX_ENIGMA_AP] * (1.0f - frac) + buf[i1] * frac;
+
+            float out = -coeff * in + delayed;
+            buf[wp] = in + coeff * delayed;
+            wp = (wp + 1) % MAX_ENIGMA_AP;
+            return out;
         }
     };
-    Comb combL, combR;
 
-    double lfoPhase = 0.0;
+    // 6 allpass stages per channel
+    std::array<EnigmaAllpass, ENIGMA_STAGES> enigmaL, enigmaR;
+
+    // Enigma feedback state (filtered)
+    float enigmaFbL = 0.0f, enigmaFbR = 0.0f;
+
+    // Enigma feedback filter (one-pole LP to shape feedback tone)
+    float enigmaFiltL = 0.0f, enigmaFiltR = 0.0f;
+
+    // Dual LFO for richer sweep (two uncorrelated sine waves)
+    double lfoPhase1 = 0.0, lfoPhase2 = 0.0;
+
+    // Base delay times for the 6 enigma stages (samples at 44.1kHz)
+    // Staggered for maximum notch spread
+    static constexpr float enigmaBaseDelays[ENIGMA_STAGES] = {
+        8.0f, 13.0f, 21.0f, 34.0f, 55.0f, 89.0f  // Fibonacci-ish for non-harmonic spacing
+    };
+
+    // Phase offsets per stage for stereo decorrelation
+    static constexpr float enigmaStereoOffset[ENIGMA_STAGES] = {
+        1.3f, 2.1f, 3.4f, 5.5f, 8.9f, 14.4f
+    };
+
+    // ═══════════════════════════════════════════════════════════
+    // COMMON STATE
+    // ═══════════════════════════════════════════════════════════
     float hpStateL = 0.0f, hpStateR = 0.0f, hpCoeff = 0.0f;
     juce::AudioBuffer<float> wetBuffer;
 
@@ -160,26 +187,21 @@ private:
 
     std::atomic<float> sweepPos{0.0f}, sweepFreq{200.0f}, rmsLevel{0.0f};
 
-    // Mutually prime base delay lengths (samples at 44.1kHz)
-    // Chosen for maximum echo density and no common factors
+    // FDN delay lengths (mutually prime, samples at 44.1kHz)
     static constexpr int baseLens[FDN_ORDER] = {
         1087, 1283, 1481, 1669, 1873, 2081, 2293, 2539
     };
 
-    // Input diffuser lengths (increasing, mutually prime)
     static constexpr int diffLens[NUM_DIFFUSERS] = { 142, 271, 379, 521 };
 
-    // FDN internal allpass lengths
     static constexpr int fdnAPLens[FDN_ORDER] = {
         211, 263, 331, 397, 461, 541, 613, 701
     };
 
-    // Per-line LFO rates (all different for decorrelation)
     static constexpr float modRates[FDN_ORDER] = {
         0.13f, 0.17f, 0.23f, 0.29f, 0.31f, 0.37f, 0.41f, 0.47f
     };
 
-    // L/R input distribution weights (spread input across all 8 lines)
     static constexpr float inWeightL[FDN_ORDER] = {
         0.50f, 0.35f, 0.25f, 0.15f, 0.10f, 0.20f, 0.30f, 0.40f
     };
@@ -187,7 +209,6 @@ private:
         0.10f, 0.20f, 0.30f, 0.40f, 0.50f, 0.35f, 0.25f, 0.15f
     };
 
-    // L/R output tap weights (different from input for decorrelation)
     static constexpr float outWeightL[FDN_ORDER] = {
         0.40f, 0.30f, 0.20f, 0.10f, -0.10f, -0.20f, 0.30f, 0.40f
     };
