@@ -8,7 +8,7 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     background = juce::ImageCache::getFromMemory(
         BinaryData::background_png, BinaryData::background_pngSize);
 
-    // Create filmstrip knobs (128 frames each, Blender-rendered)
+    // Create filmstrip knobs
     auto makeKnob = [this](const char* name, const void* data, size_t size)
     {
         auto k = std::make_unique<FilmstripKnob>(name, data, size, 128);
@@ -16,28 +16,21 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
         return k;
     };
 
-    // Top row: TIME, FDBK, DECAY, TONE
-    knobTime  = makeKnob("TIME",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
-    knobFdbk  = makeKnob("FDBK",  BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
-    knobDecay = makeKnob("DECAY", BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
-    knobTone  = makeKnob("TONE",  BinaryData::knob_TILT_png,   BinaryData::knob_TILT_pngSize);
+    // Top row: SIZE, DECAY, TONE, MIX
+    knobSize  = makeKnob("SIZE",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
+    knobDecay = makeKnob("DECAY", BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
+    knobTone  = makeKnob("TONE",  BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
+    knobMix   = makeKnob("MIX",   BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
 
-    // Bottom row: RATE, DEPTH, SPREAD, MIX
-    knobRate   = makeKnob("RATE",   BinaryData::knob_DIR_png,    BinaryData::knob_DIR_pngSize);
-    knobDepth  = makeKnob("DEPTH",  BinaryData::knob_ENV_png,    BinaryData::knob_ENV_pngSize);
-    knobSpread = makeKnob("SPREAD", BinaryData::knob_SPREAD_png, BinaryData::knob_SPREAD_pngSize);
-    knobMix    = makeKnob("MIX",    BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
-
-    // Attach to APVTS
+    // Attach to APVTS (top row)
     auto& apvts = processor.getAPVTS();
-    attTime   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "time",     *knobTime);
-    attFdbk   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "feedback", *knobFdbk);
-    attDecay  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "decay",    *knobDecay);
-    attTone   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "tone",     *knobTone);
-    attRate   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "rate",     *knobRate);
-    attDepth  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "depth",    *knobDepth);
-    attSpread = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "spread",   *knobSpread);
-    attMix    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "mix",      *knobMix);
+    attSize  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "time",     *knobSize);
+    attDecay = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "feedback", *knobDecay);
+    attTone  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "decay",    *knobTone);
+    attMix   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "tone",     *knobMix);
+
+    // Bypass button bounds (to the left of top row knobs)
+    bypassBounds = { 12, 163, 38, 38 };
 
     // Ghost renderer
     ghostRenderer.loadSpritesheet(
@@ -49,9 +42,7 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     // Sweep display
     addAndMakeVisible(spectrumDisplay);
 
-    // Timer for UI updates
     startTimerHz(30);
-
     setSize(471, 596);
 }
 
@@ -62,13 +53,18 @@ GhostDelayEditor::~GhostDelayEditor()
 
 void GhostDelayEditor::timerCallback()
 {
-    // Feed audio level to ghost
     ghostRenderer.setAudioLevel(processor.getCurrentRMSLevel());
-
-    // Feed sweep data to display
     spectrumDisplay.setSweepPosition(processor.getSweepPosition());
     spectrumDisplay.setSweepFrequency(processor.getSweepFrequency());
     spectrumDisplay.setAudioLevel(processor.getCurrentRMSLevel());
+
+    // Check bypass state for repaint
+    bool active = *processor.getAPVTS().getRawParameterValue("reverb") > 0.5f;
+    if (active != lastBypassState)
+    {
+        lastBypassState = active;
+        repaint(bypassBounds);
+    }
 
     // Self-capture trigger
     juce::File trigger("/tmp/ghost_capture_trigger");
@@ -79,58 +75,86 @@ void GhostDelayEditor::timerCallback()
     }
 }
 
+void GhostDelayEditor::mouseDown(const juce::MouseEvent& event)
+{
+    if (bypassBounds.contains(event.getPosition()))
+    {
+        auto* param = processor.getAPVTS().getParameter("reverb");
+        float current = param->getValue();
+        param->setValueNotifyingHost(current > 0.5f ? 0.0f : 1.0f);
+        repaint(bypassBounds);
+    }
+}
+
 void GhostDelayEditor::paint(juce::Graphics& g)
 {
-    // Blender-rendered background
+    // Background
     if (!background.isNull())
         g.drawImage(background, getLocalBounds().toFloat());
     else
         g.fillAll(juce::Colour(0x1a, 0x1a, 0x1a));
 
-    // Cover baked-in ghost area for animated ghost overlay
+    // Ghost area (animated overlay)
     g.setColour(juce::Colour(0x1a, 0x4a, 0x3a));
     g.fillRect(69, 389, 331, 99);
 
-    // ── Knob labels ─────────────────────────────────────────
+    // ── Bypass button ───────────────────────────────────────
+    bool active = *processor.getAPVTS().getRawParameterValue("reverb") > 0.5f;
+    auto teal = juce::Colour(0x0d, 0x94, 0x88);
+    auto btnF = bypassBounds.toFloat();
+
+    if (active)
+    {
+        // Glow halo
+        g.setColour(teal.withAlpha(0.25f));
+        g.fillRoundedRectangle(btnF.expanded(3), 10.0f);
+        // Button fill
+        g.setColour(teal);
+        g.fillRoundedRectangle(btnF, 8.0f);
+        // Label
+        g.setColour(juce::Colours::white);
+    }
+    else
+    {
+        // Dim button
+        g.setColour(juce::Colour(0x28, 0x28, 0x28));
+        g.fillRoundedRectangle(btnF, 8.0f);
+        g.setColour(juce::Colour(0x44, 0x44, 0x44));
+        g.drawRoundedRectangle(btnF, 8.0f, 1.0f);
+        // Dim label
+        g.setColour(juce::Colour(0x55, 0x55, 0x55));
+    }
+    g.setFont(juce::FontOptions(10.0f));
+    g.drawText("REV", bypassBounds, juce::Justification::centred);
+
+    // ── Knob labels (top row only) ──────────────────────────
     g.setColour(juce::Colour(0xcc, 0xcc, 0xdd));
-    g.setFont(juce::Font(11.0f).boldened());
+    g.setFont(juce::FontOptions(11.0f));
 
-    // Top row labels — REVERB
-    int labelY1 = 221;
-    g.drawText("SIZE",    95 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("DECAY",  188 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("TONE",   281 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("DIFF",   374 - 40, labelY1, 80, 14, juce::Justification::centred);
+    int labelY = 221;
+    g.drawText("SIZE",   95 - 40, labelY, 80, 14, juce::Justification::centred);
+    g.drawText("DECAY", 188 - 40, labelY, 80, 14, juce::Justification::centred);
+    g.drawText("TONE",  281 - 40, labelY, 80, 14, juce::Justification::centred);
+    g.drawText("MIX",   374 - 40, labelY, 80, 14, juce::Justification::centred);
 
-    // Bottom row labels — MODULATION
-    int labelY2 = 333;
-    g.drawText("RATE",    95 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("DEPTH",  188 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("NOTCH",  281 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("MIX",    374 - 40, labelY2, 80, 14, juce::Justification::centred);
+    // No bottom row labels
 }
 
 void GhostDelayEditor::resized()
 {
-    int knobSize = 80;
-    int hk = knobSize / 2;
+    int ks = 80;
+    int hk = ks / 2;
 
-    // Top row: TIME, FDBK, DECAY, TONE
-    knobTime->setBounds( 95 - hk, 177 - hk, knobSize, knobSize);
-    knobFdbk->setBounds(188 - hk, 177 - hk, knobSize, knobSize);
-    knobDecay->setBounds(281 - hk, 177 - hk, knobSize, knobSize);
-    knobTone->setBounds(374 - hk, 177 - hk, knobSize, knobSize);
+    // Top row: SIZE, DECAY, TONE, MIX
+    knobSize  ->setBounds( 95 - hk, 177 - hk, ks, ks);
+    knobDecay ->setBounds(188 - hk, 177 - hk, ks, ks);
+    knobTone  ->setBounds(281 - hk, 177 - hk, ks, ks);
+    knobMix   ->setBounds(374 - hk, 177 - hk, ks, ks);
 
-    // Bottom row: RATE, DEPTH, SPREAD, MIX
-    knobRate->setBounds(  95 - hk, 289 - hk, knobSize, knobSize);
-    knobDepth->setBounds(188 - hk, 289 - hk, knobSize, knobSize);
-    knobSpread->setBounds(281 - hk, 289 - hk, knobSize, knobSize);
-    knobMix->setBounds(  374 - hk, 289 - hk, knobSize, knobSize);
-
-    // Ghost renderer — ScreenBacking area
+    // Ghost renderer
     ghostRenderer.setBounds(67, 387, 335, 103);
     ghostRenderer.setSpriteOffset(67, 387);
 
-    // Sweep display — top screen area
+    // Sweep display
     spectrumDisplay.setBounds(108, 76, 254, 35);
 }

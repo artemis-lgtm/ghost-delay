@@ -16,37 +16,43 @@ GhostDelayProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
+    // Top row (active)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("time", 1), "TIME",
+        juce::ParameterID("time", 1), "SIZE",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("feedback", 1), "FDBK",
+        juce::ParameterID("feedback", 1), "DECAY",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.4f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("decay", 1), "DECAY",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
+        juce::ParameterID("decay", 1), "TONE",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.6f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("tone", 1), "TONE",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
+        juce::ParameterID("tone", 1), "MIX",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.35f));
 
+    // Bottom row (reserved, inactive — kept for preset compatibility)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("rate", 1), "RATE",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("depth", 1), "DEPTH",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.7f));
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("spread", 1), "SPREAD",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("mix", 1), "MIX",
+        juce::ParameterID("mix", 1), "MIX_GLOBAL",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
+
+    // Reverb bypass (bool — true = reverb active)
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID("reverb", 1), "Reverb Active", true));
 
     return { params.begin(), params.end() };
 }
@@ -66,14 +72,18 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
 
-    if (bypassed.load())
-        return;
+    // Reverb bypass from APVTS
+    bool reverbActive = *apvts.getRawParameterValue("reverb") > 0.5f;
+    if (!reverbActive)
+        return;  // Clean pass-through
 
-    // Feed parameters from APVTS to engine
+    // Feed active parameters to engine
     engine.setTime(*apvts.getRawParameterValue("time"));
     engine.setFeedback(*apvts.getRawParameterValue("feedback"));
     engine.setDecay(*apvts.getRawParameterValue("decay"));
     engine.setTone(*apvts.getRawParameterValue("tone"));
+
+    // Bottom row params not used but safe to call (stubs)
     engine.setRate(*apvts.getRawParameterValue("rate"));
     engine.setDepth(*apvts.getRawParameterValue("depth"));
     engine.setSpread(*apvts.getRawParameterValue("spread"));

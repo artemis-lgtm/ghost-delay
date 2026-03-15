@@ -14,26 +14,29 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    void mouseDown(const juce::MouseEvent& event) override;
 
 private:
     void timerCallback() override;
 
     GhostDelayProcessor& processor;
-
     juce::Image background;
 
-    // 8 filmstrip knobs — v2.0 layout
-    std::unique_ptr<FilmstripKnob> knobTime, knobFdbk, knobDecay, knobTone;
-    std::unique_ptr<FilmstripKnob> knobRate, knobDepth, knobSpread, knobMix;
+    // Top row: SIZE, DECAY, TONE, MIX
+    std::unique_ptr<FilmstripKnob> knobSize, knobDecay, knobTone, knobMix;
 
-    // APVTS attachments
+    // APVTS attachments (top row only)
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        attTime, attFdbk, attDecay, attTone, attRate, attDepth, attSpread, attMix;
+        attSize, attDecay, attTone, attMix;
+
+    // Bypass button (custom drawn, linked to "reverb" APVTS param)
+    juce::Rectangle<int> bypassBounds;
+    bool lastBypassState = true;
 
     // Ghost animation
     GhostRenderer ghostRenderer;
 
-    // Sweep display (replaces old spectrum analyzer)
+    // Sweep display
     SpectrumDisplay spectrumDisplay;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GhostDelayEditor)
