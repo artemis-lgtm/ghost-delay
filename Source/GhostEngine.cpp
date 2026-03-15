@@ -22,9 +22,11 @@ void GhostEngine::prepare(double sr, int blockSize)
     reverb.setSampleRate(sr);
     reverb.reset();
 
-    // SVF
+    // SVFs (bandpass + lowpass)
     svfL.reset();
     svfR.reset();
+    lpfL.reset();
+    lpfR.reset();
 
     // DC-blocking HP at 30 Hz (1-pole)
     float hpFreq = 30.0f;
@@ -53,6 +55,8 @@ void GhostEngine::reset()
     reverb.reset();
     svfL.reset();
     svfR.reset();
+    lpfL.reset();
+    lpfR.reset();
     hpStateL = 0.0f;
     hpStateR = 0.0f;
     lfoPhase = 0.0;
@@ -130,27 +134,41 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Step 2: Reverb (block-based, always stereo on wetBuffer) ─
-    // wetBuffer is always 2 channels even with mono input
+    // ── Step 2: Reverb (block-based, always stereo) ─────────
     reverb.processStereo(wetBuffer.getWritePointer(0),
                          wetBuffer.getWritePointer(1),
                          numSamples);
 
     // ── Step 3: Subtle tape saturation on reverb output ─────
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (int ch = 0; ch < 2; ++ch)
     {
         auto* wet = wetBuffer.getWritePointer(ch);
         for (int s = 0; s < numSamples; ++s)
             wet[s] = std::tanh(wet[s] * 1.15f) / 1.15f;
     }
 
-    // ── Step 4: Animated bandpass sweep (per-sample) ────────
-    // Sweep frequency range: 200 Hz to 600 Hz
-    constexpr float FREQ_LOW  = 200.0f;
-    constexpr float FREQ_HIGH = 600.0f;
+    // ── Step 3.5: Global low-pass filter (TONE) ─────────────
+    // TONE controls wet signal LP cutoff: 200 Hz (fully dark) → 2000 Hz (less dark)
+    // Never fully bright — everything stays submerged
+    float lpCutoff = 200.0f + tone * 1800.0f;   // 200 Hz → 2000 Hz
+    float lpQ = 0.707f;   // Butterworth-ish, no resonance — smooth rolloff
 
-    // Q from TONE (quadratic: gentle at low, resonant at high)
-    float q = 0.5f + tone * tone * 5.0f;   // 0.5 → 5.5
+    for (int s = 0; s < numSamples; ++s)
+    {
+        float wetL = wetBuffer.getSample(0, s);
+        float wetR = wetBuffer.getSample(1, s);
+        wetBuffer.setSample(0, s, lpfL.processLowpass(wetL, lpCutoff, lpQ, sampleRate));
+        wetBuffer.setSample(1, s, lpfR.processLowpass(wetR, lpCutoff, lpQ, sampleRate));
+    }
+
+    // ── Step 4: Animated bandpass sweep (per-sample) ────────
+    // Underwater sweep range: 100 Hz to 400 Hz (deep, murky)
+    constexpr float FREQ_LOW  = 100.0f;
+    constexpr float FREQ_HIGH = 400.0f;
+
+    // Q: gentle resonance — enough to hear the sweep, not piercing
+    // Wider Q than before since the LP already darkens everything
+    float q = 0.7f + tone * tone * 3.0f;   // 0.7 → 3.7
 
     // Sweep rate
     float sweepHz = getSweepRateHz();
@@ -160,7 +178,7 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
     bool usePPQ = hasPPQ && hostPlaying && hostBPM > 20.0;
     double sweepPeriodBeats = getSweepPeriodBeats();
 
-    // Per-sample tracking for UI (updated at end)
+    // Per-sample tracking for UI
     float lastFreqL = FREQ_LOW;
 
     for (int s = 0; s < numSamples; ++s)
@@ -169,7 +187,6 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         double currentPhase;
         if (usePPQ)
         {
-            // Derive phase directly from playhead position
             double sampleBeatOffset = (double)s * (hostBPM / (60.0 * sampleRate));
             double currentBeat = ppqPosition + sampleBeatOffset;
             currentPhase = std::fmod(currentBeat / sweepPeriodBeats, 1.0);
@@ -184,7 +201,7 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
 
         // Sine LFO → 0–1 range
         float lfoVal  = (float)(std::sin(currentPhase * juce::MathConstants<double>::twoPi));
-        float lfoNorm = (lfoVal + 1.0f) * 0.5f;    // 0–1
+        float lfoNorm = (lfoVal + 1.0f) * 0.5f;
 
         // ── Center frequencies (L and R with spread offset) ─
         float centerL = FREQ_LOW + (FREQ_HIGH - FREQ_LOW) * lfoNorm;
@@ -203,34 +220,28 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
             // Left
             float wetL = wetBuffer.getSample(0, s);
             float bpL  = svfL.processBandpass(wetL, centerL, q, sampleRate);
-            // Boost bandpass output to compensate for narrow Q energy loss
-            bpL *= (1.0f + q * 0.4f);
+            bpL *= (1.0f + q * 0.5f);   // Compensate for BP energy loss
             wetBuffer.setSample(0, s, wetL * (1.0f - depth) + bpL * depth);
 
             // Right
-            if (numChannels > 1)
             {
                 float wetR = wetBuffer.getSample(1, s);
                 float bpR  = svfR.processBandpass(wetR, centerR, q, sampleRate);
-                bpR *= (1.0f + q * 0.4f);
+                bpR *= (1.0f + q * 0.5f);
                 wetBuffer.setSample(1, s, wetR * (1.0f - depth) + bpR * depth);
             }
         }
     }
 
     // ── Step 5: Mix dry/wet + DC-blocking HP ────────────────
-    // Handle mono-to-stereo: if input is mono but we have a stereo bus,
-    // process both channels using the mono input as dry for both.
     const int outChannels = buffer.getNumChannels();
     const int mixChannels = std::min(outChannels, 2);
 
     float rms = 0.0f;
     for (int ch = 0; ch < mixChannels; ++ch)
     {
-        // For mono input, use channel 0 as dry source for both L and R
         const int dryCh = (ch < numChannels) ? ch : 0;
         const float* dry = buffer.getReadPointer(dryCh);
-        // Wet buffer always has stereo from reverb processing
         const int wetCh = std::min(ch, wetBuffer.getNumChannels() - 1);
         const float* wet = wetBuffer.getReadPointer(wetCh);
         float* out = buffer.getWritePointer(ch);
@@ -265,7 +276,6 @@ float GhostEngine::getDelayTimeSamples(int channel) const
 
     if (hostBPM > 20.0)
     {
-        // Tempo-synced: quantize to nearest subdivision
         int idx = juce::jlimit(0, NUM_SUBS - 1, (int)(time * (float)NUM_SUBS));
         float beats = delaySubs[idx];
         double secondsPerBeat = 60.0 / hostBPM;
@@ -273,26 +283,24 @@ float GhostEngine::getDelayTimeSamples(int channel) const
     }
     else
     {
-        // Free-running: 20ms → 2000ms (exponential)
         float ms = 20.0f * std::pow(100.0f, time);
         samples = ms * 0.001f * (float)sampleRate;
     }
 
-    // Stereo spread: R channel slightly longer (Haas-style widening)
     if (channel == 1)
-        samples *= (1.0f + spread * 0.02f);   // Up to 2% offset
+        samples *= (1.0f + spread * 0.02f);
 
     return std::clamp(samples, 1.0f, (float)(MAX_DELAY_SAMPLES - 1));
 }
 
 // ═════════════════════════════════════════════════════════════════
-// Sweep rate calculation
+// Sweep rate calculation — SLOWER for underwater feel
 // ═════════════════════════════════════════════════════════════════
 double GhostEngine::getSweepPeriodBeats() const
 {
-    // Exponential: 32 beats (8 bars, slow) → 0.5 beats (1/8 note, fast)
-    // rate=0 → 32, rate=0.5 → 4, rate=1 → 0.5
-    return 32.0 * std::pow(0.015625, (double)rate);
+    // Slower range: 64 beats (16 bars, glacial) → 2 beats (1/2 note, moderate)
+    // rate=0 → 64 beats, rate=0.5 → ~11 beats, rate=1 → 2 beats
+    return 64.0 * std::pow(0.03125, (double)rate);
 }
 
 float GhostEngine::getSweepRateHz() const
@@ -306,22 +314,22 @@ float GhostEngine::getSweepRateHz() const
     }
     else
     {
-        // Free-running: 0.05 Hz → 8 Hz
-        return (float)(0.05 * std::pow(160.0, (double)rate));
+        // Free-running: 0.02 Hz → 4 Hz (slower range)
+        return (float)(0.02 * std::pow(200.0, (double)rate));
     }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// Reverb parameter mapping
+// Reverb parameter mapping — HEAVIER damping for underwater
 // ═════════════════════════════════════════════════════════════════
 void GhostEngine::updateReverbParams()
 {
     juce::Reverb::Parameters params;
-    params.roomSize   = 0.3f + decay * 0.69f;           // 0.3 → 0.99
-    params.damping    = 1.0f - (tone * 0.7f);            // 1.0 (dark) → 0.3 (bright)
-    params.wetLevel   = 1.0f;                             // Full wet (external mix)
+    params.roomSize   = 0.4f + decay * 0.59f;            // 0.4 → 0.99 (larger base room)
+    params.damping    = 0.7f + (1.0f - tone) * 0.29f;    // 0.7 → 0.99 (always heavy damping)
+    params.wetLevel   = 1.0f;
     params.dryLevel   = 0.0f;
-    params.width      = 0.3f + spread * 0.7f;            // 0.3 → 1.0
+    params.width      = 0.3f + spread * 0.7f;
     params.freezeMode = 0.0f;
     reverb.setParameters(params);
 }
