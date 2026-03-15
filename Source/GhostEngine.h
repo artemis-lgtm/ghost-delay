@@ -6,24 +6,22 @@
 #include <atomic>
 
 /**
- * Ghost Delay v3.0 — Valhalla-style Reverb + Enigma-style Modulation
+ * Ghost Delay v3.1 — Valhalla-quality FDN Reverb + Enigma Modulation
+ *
+ * Architecture based on:
+ *   - Stautner/Puckette (1982): FDN reverb with rotation matrix
+ *   - Jot (1992): Frequency-dependent decay via absorption filters
+ *   - Sean Costello / Valhalla DSP: Modulated allpasses, scaled mod depth,
+ *     no-net-pitch-change modulation, dense input diffusion
+ *   - Julius O. Smith: Mutually prime delay lengths, Hadamard mixing
  *
  * Signal chain:
- *   Input → FDN Reverb (SIZE, DECAY, TONE, DIFF) →
- *   Modulated Comb Filter / Notch Sweep (RATE, DEPTH, NOTCH) →
- *   Mix with dry → Output
+ *   Input → 4x Cascaded Input Diffusers (modulated) →
+ *   8-channel FDN (Hadamard matrix, per-line LP, modulated allpasses) →
+ *   L/R output taps → Enigma comb modulation → Mix → Output
  *
- * Top row (REVERB):
- *   SIZE  — Room size (allpass delay lengths)
- *   DECAY — Tail length (feedback gain, independent of size)
- *   TONE  — Feedback loop low-pass (each repeat gets darker)
- *   DIFF  — Diffusion (allpass coefficient — smeared vs distinct)
- *
- * Bottom row (MODULATION):
- *   RATE  — LFO speed for comb/notch sweep
- *   DEPTH — How deep the comb notches cut
- *   NOTCH — Comb frequency / notch spacing
- *   MIX   — Dry/wet
+ * Top row:  SIZE, DECAY, TONE, DIFF
+ * Bottom:   RATE, DEPTH, NOTCH, MIX
  */
 class GhostEngine
 {
@@ -36,215 +34,164 @@ public:
                  juce::AudioPlayHead* playHead);
     void reset();
 
-    // ── Parameter setters (mapped from APVTS) ───────────────
-    void setTime(float v)     { size = v; }       // "time" param ID → SIZE
-    void setFeedback(float v) { decay = v; }      // "feedback" → DECAY
-    void setDecay(float v)    { fdnTone = v; }    // "decay" → TONE
-    void setTone(float v)     { diff = v; }       // "tone" → DIFF
-    void setRate(float v)     { rate = v; }       // "rate" → RATE
-    void setDepth(float v)    { depth = v; }      // "depth" → DEPTH
-    void setSpread(float v)   { notch = v; }      // "spread" → NOTCH
-    void setMix(float v)      { mix = v; }        // "mix" → MIX
+    // Parameter setters (mapped from APVTS IDs)
+    void setTime(float v)     { size = v; }
+    void setFeedback(float v) { decay = v; }
+    void setDecay(float v)    { fdnTone = v; }
+    void setTone(float v)     { diff = v; }
+    void setRate(float v)     { rate = v; }
+    void setDepth(float v)    { depth = v; }
+    void setSpread(float v)   { notch = v; }
+    void setMix(float v)      { mix = v; }
 
-    // ── UI queries ──────────────────────────────────────────
+    // UI queries
     float getSweepPosition() const  { return sweepPos.load(); }
     float getSweepFrequency() const { return sweepFreq.load(); }
     float getCurrentRMSLevel() const { return rmsLevel.load(); }
 
 private:
     // ═══════════════════════════════════════════════════════════
-    // FDN REVERB (4-channel feedback delay network)
+    // 8-CHANNEL FDN (single network, stereo I/O)
     // ═══════════════════════════════════════════════════════════
+    static constexpr int FDN_ORDER = 8;
+    static constexpr int MAX_DELAY = 12000;  // ~250ms at 48kHz
 
-    static constexpr int FDN_SIZE = 4;
-    static constexpr int MAX_FDN_DELAY = 8192;
-
-    // Delay lines for FDN
-    struct FDNDelay
+    struct DelayLine
     {
-        std::array<float, MAX_FDN_DELAY> buffer {};
-        int writePos = 0;
-        int length = 1000;
-
-        void clear() { buffer.fill(0.0f); writePos = 0; }
-
-        void write(float sample)
+        std::array<float, MAX_DELAY> buf {};
+        int wp = 0, len = 1000;
+        void clear() { buf.fill(0.0f); wp = 0; }
+        void write(float s) { buf[wp] = s; wp = (wp + 1) % len; }
+        float read() const { return buf[wp]; }
+        float readInterp(float delay) const
         {
-            buffer[writePos] = sample;
-            writePos = (writePos + 1) % length;
-        }
-
-        float read() const
-        {
-            return buffer[writePos]; // read from write position = full delay
-        }
-
-        float readAt(float delaySamples) const
-        {
-            float readPos = (float)writePos - delaySamples;
-            if (readPos < 0.0f) readPos += (float)length;
-            int idx0 = (int)readPos;
-            int idx1 = (idx0 + 1) % length;
-            float frac = readPos - (float)idx0;
-            return buffer[idx0 % length] * (1.0f - frac) + buffer[idx1] * frac;
+            float rp = (float)wp - delay;
+            if (rp < 0.0f) rp += (float)len;
+            int i0 = (int)rp, i1 = (i0 + 1) % len;
+            float f = rp - (float)i0;
+            return buf[i0 % len] * (1.0f - f) + buf[i1] * f;
         }
     };
 
-    // 4 delay lines per channel (L/R)
-    std::array<FDNDelay, FDN_SIZE> fdnL;
-    std::array<FDNDelay, FDN_SIZE> fdnR;
+    std::array<DelayLine, FDN_ORDER> fdn;
 
-    // Allpass diffusers (input diffusion, Valhalla-style)
-    struct Allpass
-    {
-        std::array<float, 4096> buffer {};
-        int writePos = 0;
-        int length = 500;
+    // Per-line absorption filter (one-pole LP in feedback)
+    struct AbsFilter { float s = 0.0f; void reset() { s = 0.0f; } };
+    std::array<AbsFilter, FDN_ORDER> absF;
 
-        void clear() { buffer.fill(0.0f); writePos = 0; }
+    // ═══════════════════════════════════════════════════════════
+    // INPUT DIFFUSERS (4 cascaded, modulated allpasses)
+    // ═══════════════════════════════════════════════════════════
+    static constexpr int NUM_DIFFUSERS = 4;
+    static constexpr int MAX_AP = 4096;
 
-        float process(float input, float coeff)
-        {
-            float delayed = buffer[writePos];
-            float feedfwd = input * (-coeff) + delayed;
-            buffer[writePos] = input + delayed * coeff;
-            writePos = (writePos + 1) % length;
-            return feedfwd;
-        }
-    };
-
-    // 2 input diffusers per channel
-    std::array<Allpass, 2> diffuserL;
-    std::array<Allpass, 2> diffuserR;
-
-    // One-pole low-pass in FDN feedback loop (per delay line, per channel)
-    struct OnePoleLP
-    {
-        float state = 0.0f;
-        float process(float input, float coeff)
-        {
-            state += coeff * (input - state);
-            return state;
-        }
-        void reset() { state = 0.0f; }
-    };
-
-    std::array<OnePoleLP, FDN_SIZE> fdnLPL;
-    std::array<OnePoleLP, FDN_SIZE> fdnLPR;
-
-    // Modulated allpass inside FDN (for lush detuning)
     struct ModAllpass
     {
-        std::array<float, 4096> buffer {};
-        int writePos = 0;
-        int length = 300;
+        std::array<float, MAX_AP> buf {};
+        int wp = 0, baseLen = 500;
         float phase = 0.0f;
+        void clear() { buf.fill(0.0f); wp = 0; }
 
-        void clear() { buffer.fill(0.0f); writePos = 0; phase = 0.0f; }
-
-        float process(float input, float coeff, float modDepth, float modRate, double sr)
+        float process(float in, float coeff, float modSamples, float modHz, double sr)
         {
-            // Modulated read position
-            phase += (float)(modRate / sr);
+            // Multi-rate LFO for no-net-pitch-change
+            phase += (float)(modHz / sr);
             if (phase >= 1.0f) phase -= 1.0f;
-            float modOffset = modDepth * std::sin(phase * juce::MathConstants<float>::twoPi);
+            float mod = modSamples * std::sin(phase * juce::MathConstants<float>::twoPi);
 
-            float readDelay = (float)length + modOffset;
-            float readPos = (float)writePos - readDelay;
-            if (readPos < 0.0f) readPos += (float)buffer.size();
+            float readDelay = (float)baseLen + mod;
+            readDelay = std::clamp(readDelay, 1.0f, (float)(MAX_AP - 2));
 
-            int idx0 = (int)readPos;
-            int idx1 = (idx0 + 1) % (int)buffer.size();
-            float frac = readPos - (float)idx0;
-            float delayed = buffer[idx0 % buffer.size()] * (1.0f - frac)
-                          + buffer[idx1] * frac;
+            float rp = (float)wp - readDelay;
+            if (rp < 0.0f) rp += (float)MAX_AP;
+            int i0 = (int)rp, i1 = (i0 + 1) % MAX_AP;
+            float f = rp - (float)i0;
+            float delayed = buf[i0 % MAX_AP] * (1.0f - f) + buf[i1] * f;
 
-            float feedfwd = input * (-coeff) + delayed;
-            buffer[writePos] = input + delayed * coeff;
-            writePos = (writePos + 1) % (int)buffer.size();
-            return feedfwd;
+            float out = in * (-coeff) + delayed;
+            buf[wp] = in + delayed * coeff;
+            wp = (wp + 1) % MAX_AP;
+            return out;
         }
     };
 
-    // One mod-allpass per FDN channel
-    std::array<ModAllpass, FDN_SIZE> modAPL;
-    std::array<ModAllpass, FDN_SIZE> modAPR;
+    // Input diffusers: 2 per channel (L/R) × 2 stages = 4 total per channel
+    std::array<ModAllpass, NUM_DIFFUSERS> diffL, diffR;
+
+    // FDN internal modulated allpasses (one per delay line)
+    std::array<ModAllpass, FDN_ORDER> fdnAP;
 
     // ═══════════════════════════════════════════════════════════
-    // ENIGMA-STYLE MODULATED COMB FILTER
+    // ENIGMA COMB FILTER
     // ═══════════════════════════════════════════════════════════
-
-    static constexpr int MAX_COMB_DELAY = 4096;
-    struct CombFilter
+    static constexpr int MAX_COMB = 4096;
+    struct Comb
     {
-        std::array<float, MAX_COMB_DELAY> buffer {};
-        int writePos = 0;
-
-        void clear() { buffer.fill(0.0f); writePos = 0; }
-
-        float process(float input, float delaySamples, float feedback)
+        std::array<float, MAX_COMB> buf {};
+        int wp = 0;
+        void clear() { buf.fill(0.0f); wp = 0; }
+        float process(float in, float delay, float fb)
         {
-            // Read with interpolation
-            float readPos = (float)writePos - delaySamples;
-            if (readPos < 0.0f) readPos += (float)MAX_COMB_DELAY;
-            int idx0 = (int)readPos;
-            int idx1 = (idx0 + 1) % MAX_COMB_DELAY;
-            float frac = readPos - (float)idx0;
-            float delayed = buffer[idx0] * (1.0f - frac) + buffer[idx1] * frac;
-
-            // Write with feedback
-            buffer[writePos] = input + delayed * feedback;
-            writePos = (writePos + 1) % MAX_COMB_DELAY;
-
-            // Output: notch = input - delayed, comb = input + delayed
-            // Blend based on depth: 0 = passthrough, 1 = full comb effect
-            return delayed;
+            float rp = (float)wp - delay;
+            if (rp < 0.0f) rp += (float)MAX_COMB;
+            int i0 = (int)rp, i1 = (i0 + 1) % MAX_COMB;
+            float f = rp - (float)i0;
+            float del = buf[i0] * (1.0f - f) + buf[i1] * f;
+            buf[wp] = in + del * fb;
+            wp = (wp + 1) % MAX_COMB;
+            return del;
         }
     };
+    Comb combL, combR;
 
-    CombFilter combL, combR;
-
-    // ═══════════════════════════════════════════════════════════
-    // LFO for modulation section
-    // ═══════════════════════════════════════════════════════════
     double lfoPhase = 0.0;
-
-    // DC-blocking
     float hpStateL = 0.0f, hpStateR = 0.0f, hpCoeff = 0.0f;
-
-    // Pre-allocated wet buffer
     juce::AudioBuffer<float> wetBuffer;
 
-    // ── Parameters (0–1) ────────────────────────────────────
-    float size   = 0.5f;   // Room size
-    float decay  = 0.5f;   // Tail length
-    float fdnTone = 0.5f;  // Feedback LP
-    float diff   = 0.7f;   // Diffusion
-    float rate   = 0.3f;   // Mod LFO speed
-    float depth  = 0.5f;   // Mod depth
-    float notch  = 0.5f;   // Comb frequency
-    float mix    = 0.5f;   // Dry/wet
+    // Parameters (0-1)
+    float size = 0.5f, decay = 0.5f, fdnTone = 0.5f, diff = 0.7f;
+    float rate = 0.3f, depth = 0.5f, notch = 0.5f, mix = 0.5f;
 
-    // Host transport
     double hostBPM = 120.0;
     bool hostPlaying = false;
     double ppqPosition = 0.0;
     bool hasPPQ = false;
-
     double sampleRate = 44100.0;
 
-    // UI feedback
-    std::atomic<float> sweepPos  { 0.0f };
-    std::atomic<float> sweepFreq { 200.0f };
-    std::atomic<float> rmsLevel  { 0.0f };
+    std::atomic<float> sweepPos{0.0f}, sweepFreq{200.0f}, rmsLevel{0.0f};
 
-    // ── Helpers ─────────────────────────────────────────────
-    void updateFDNDelayLengths();
+    // Mutually prime base delay lengths (samples at 44.1kHz)
+    // Chosen for maximum echo density and no common factors
+    static constexpr int baseLens[FDN_ORDER] = {
+        1087, 1283, 1481, 1669, 1873, 2081, 2293, 2539
+    };
 
-    // Base delay times (in samples at 44.1kHz) — mutually prime for maximal density
-    static constexpr int baseLengths[FDN_SIZE] = { 1087, 1283, 1543, 1823 };
-    // Diffuser lengths
-    static constexpr int diffLengths[2] = { 142, 379 };
-    // Mod allpass lengths
-    static constexpr int modAPLengths[FDN_SIZE] = { 251, 331, 409, 503 };
+    // Input diffuser lengths (increasing, mutually prime)
+    static constexpr int diffLens[NUM_DIFFUSERS] = { 142, 271, 379, 521 };
+
+    // FDN internal allpass lengths
+    static constexpr int fdnAPLens[FDN_ORDER] = {
+        211, 263, 331, 397, 461, 541, 613, 701
+    };
+
+    // Per-line LFO rates (all different for decorrelation)
+    static constexpr float modRates[FDN_ORDER] = {
+        0.13f, 0.17f, 0.23f, 0.29f, 0.31f, 0.37f, 0.41f, 0.47f
+    };
+
+    // L/R input distribution weights (spread input across all 8 lines)
+    static constexpr float inWeightL[FDN_ORDER] = {
+        0.50f, 0.35f, 0.25f, 0.15f, 0.10f, 0.20f, 0.30f, 0.40f
+    };
+    static constexpr float inWeightR[FDN_ORDER] = {
+        0.10f, 0.20f, 0.30f, 0.40f, 0.50f, 0.35f, 0.25f, 0.15f
+    };
+
+    // L/R output tap weights (different from input for decorrelation)
+    static constexpr float outWeightL[FDN_ORDER] = {
+        0.40f, 0.30f, 0.20f, 0.10f, -0.10f, -0.20f, 0.30f, 0.40f
+    };
+    static constexpr float outWeightR[FDN_ORDER] = {
+        -0.10f, 0.20f, 0.30f, 0.40f, 0.40f, 0.30f, -0.20f, 0.10f
+    };
 };
