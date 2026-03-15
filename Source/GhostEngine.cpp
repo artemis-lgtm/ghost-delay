@@ -120,10 +120,9 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         delayWriteL = (delayWriteL + 1) % MAX_DELAY_SAMPLES;
         wetBuffer.setSample(0, s, delayedL);
 
-        // Right channel
-        if (numChannels > 1)
+        // Right channel (use mono input if only 1 channel)
         {
-            float inR = buffer.getSample(1, s);
+            float inR = (numChannels > 1) ? buffer.getSample(1, s) : inL;
             float delayedR = readDelay(delayR.data(), delayWriteR, smoothDelayR);
             delayR[delayWriteR] = std::tanh(inR + delayedR * fbk);
             delayWriteR = (delayWriteR + 1) % MAX_DELAY_SAMPLES;
@@ -131,17 +130,11 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Step 2: Reverb (block-based, in-place on wetBuffer) ─
-    if (numChannels >= 2)
-    {
-        reverb.processStereo(wetBuffer.getWritePointer(0),
-                             wetBuffer.getWritePointer(1),
-                             numSamples);
-    }
-    else
-    {
-        reverb.processMono(wetBuffer.getWritePointer(0), numSamples);
-    }
+    // ── Step 2: Reverb (block-based, always stereo on wetBuffer) ─
+    // wetBuffer is always 2 channels even with mono input
+    reverb.processStereo(wetBuffer.getWritePointer(0),
+                         wetBuffer.getWritePointer(1),
+                         numSamples);
 
     // ── Step 3: Subtle tape saturation on reverb output ─────
     for (int ch = 0; ch < numChannels; ++ch)
@@ -152,9 +145,9 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
     }
 
     // ── Step 4: Animated bandpass sweep (per-sample) ────────
-    // Sweep frequency range: 60 Hz to 900 Hz
-    constexpr float FREQ_LOW  = 60.0f;
-    constexpr float FREQ_HIGH = 900.0f;
+    // Sweep frequency range: 200 Hz to 600 Hz
+    constexpr float FREQ_LOW  = 200.0f;
+    constexpr float FREQ_HIGH = 600.0f;
 
     // Q from TONE (quadratic: gentle at low, resonant at high)
     float q = 0.5f + tone * tone * 5.0f;   // 0.5 → 5.5
@@ -226,11 +219,20 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
     }
 
     // ── Step 5: Mix dry/wet + DC-blocking HP ────────────────
+    // Handle mono-to-stereo: if input is mono but we have a stereo bus,
+    // process both channels using the mono input as dry for both.
+    const int outChannels = buffer.getNumChannels();
+    const int mixChannels = std::min(outChannels, 2);
+
     float rms = 0.0f;
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (int ch = 0; ch < mixChannels; ++ch)
     {
-        const float* dry = buffer.getReadPointer(ch);
-        const float* wet = wetBuffer.getReadPointer(ch);
+        // For mono input, use channel 0 as dry source for both L and R
+        const int dryCh = (ch < numChannels) ? ch : 0;
+        const float* dry = buffer.getReadPointer(dryCh);
+        // Wet buffer always has stereo from reverb processing
+        const int wetCh = std::min(ch, wetBuffer.getNumChannels() - 1);
+        const float* wet = wetBuffer.getReadPointer(wetCh);
         float* out = buffer.getWritePointer(ch);
         float& hpState = (ch == 0) ? hpStateL : hpStateR;
 
@@ -241,7 +243,6 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
             // DC-blocking high-pass (1-pole)
             float hpOut = mixed - hpState;
             hpState = mixed - hpCoeff * hpOut;
-            // Use 'mixed' directly (the HP just removes DC, very transparent)
             out[s] = hpOut;
 
             rms += out[s] * out[s];
