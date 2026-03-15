@@ -52,7 +52,7 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     // Timer for UI updates
     startTimerHz(30);
 
-    setSize(900, 600);
+    setSize(471, 596);
 }
 
 GhostDelayEditor::~GhostDelayEditor()
@@ -89,25 +89,25 @@ void GhostDelayEditor::paint(juce::Graphics& g)
 
     // Cover baked-in ghost area for animated ghost overlay
     g.setColour(juce::Colour(0x1a, 0x4a, 0x3a));
-    g.fillRect(284, 390, 331, 99);
+    g.fillRect(69, 389, 331, 99);
 
     // ── Knob labels ─────────────────────────────────────────
     g.setColour(juce::Colour(0xcc, 0xcc, 0xdd));
     g.setFont(juce::Font(11.0f).boldened());
 
-    // Top row labels (below knobs): y = 178 + 40 + 4 = 222
-    int labelY1 = 222;
-    g.drawText("TIME",  310 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("FDBK",  403 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("DECAY", 496 - 40, labelY1, 80, 14, juce::Justification::centred);
-    g.drawText("TONE",  589 - 40, labelY1, 80, 14, juce::Justification::centred);
+    // Top row labels (below knobs)
+    int labelY1 = 221;
+    g.drawText("TIME",   95 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("FDBK",  188 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("DECAY", 281 - 40, labelY1, 80, 14, juce::Justification::centred);
+    g.drawText("TONE",  374 - 40, labelY1, 80, 14, juce::Justification::centred);
 
-    // Bottom row labels: y = 290 + 40 + 4 = 334
-    int labelY2 = 334;
-    g.drawText("RATE",   310 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("DEPTH",  403 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("SPREAD", 496 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("MIX",    589 - 40, labelY2, 80, 14, juce::Justification::centred);
+    // Bottom row labels
+    int labelY2 = 333;
+    g.drawText("RATE",    95 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("DEPTH",  188 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("SPREAD", 281 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("MIX",    374 - 40, labelY2, 80, 14, juce::Justification::centred);
 }
 
 void GhostDelayEditor::resized()
@@ -116,21 +116,21 @@ void GhostDelayEditor::resized()
     int hk = knobSize / 2;
 
     // Top row: TIME, FDBK, DECAY, TONE
-    knobTime->setBounds(310 - hk, 178 - hk, knobSize, knobSize);
-    knobFdbk->setBounds(403 - hk, 178 - hk, knobSize, knobSize);
-    knobDecay->setBounds(496 - hk, 178 - hk, knobSize, knobSize);
-    knobTone->setBounds(589 - hk, 178 - hk, knobSize, knobSize);
+    knobTime->setBounds( 95 - hk, 177 - hk, knobSize, knobSize);
+    knobFdbk->setBounds(188 - hk, 177 - hk, knobSize, knobSize);
+    knobDecay->setBounds(281 - hk, 177 - hk, knobSize, knobSize);
+    knobTone->setBounds(374 - hk, 177 - hk, knobSize, knobSize);
 
     // Bottom row: RATE, DEPTH, SPREAD, MIX
-    knobRate->setBounds(310 - hk, 290 - hk, knobSize, knobSize);
-    knobDepth->setBounds(403 - hk, 290 - hk, knobSize, knobSize);
-    knobSpread->setBounds(496 - hk, 290 - hk, knobSize, knobSize);
-    knobMix->setBounds(589 - hk, 290 - hk, knobSize, knobSize);
+    knobRate->setBounds(  95 - hk, 289 - hk, knobSize, knobSize);
+    knobDepth->setBounds(188 - hk, 289 - hk, knobSize, knobSize);
+    knobSpread->setBounds(281 - hk, 289 - hk, knobSize, knobSize);
+    knobMix->setBounds(  374 - hk, 289 - hk, knobSize, knobSize);
 
     // Ghost renderer — ScreenBacking area
-    ghostRenderer.setBounds(282, 388, 335, 103);
-    ghostRenderer.setSpriteOffset(282, 388);
+    ghostRenderer.setBounds(67, 387, 335, 103);
+    ghostRenderer.setSpriteOffset(67, 387);
 
     // Sweep display — top screen area
-    spectrumDisplay.setBounds(323, 77, 254, 35);
+    spectrumDisplay.setBounds(108, 76, 254, 35);
 }
