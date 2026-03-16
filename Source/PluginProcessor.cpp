@@ -55,6 +55,23 @@ GhostDelayProcessor::createParameterLayout()
     return { params.begin(), params.end() };
 }
 
+bool GhostDelayProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+{
+    // Accept mono->stereo, stereo->stereo, or mono->mono
+    const auto& mainIn  = layouts.getMainInputChannelSet();
+    const auto& mainOut = layouts.getMainOutputChannelSet();
+
+    if (mainOut != juce::AudioChannelSet::stereo()
+        && mainOut != juce::AudioChannelSet::mono())
+        return false;
+
+    if (mainIn != juce::AudioChannelSet::stereo()
+        && mainIn != juce::AudioChannelSet::mono())
+        return false;
+
+    return true;
+}
+
 void GhostDelayProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     engine.prepare(sampleRate, samplesPerBlock);
@@ -69,6 +86,21 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                         juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    // FORCE STEREO: If input is mono (ch1 silent or missing), duplicate ch0 to ch1
+    // This fixes the #1 user-reported bug: mono sources producing left-only dry audio
+    if (buffer.getNumChannels() >= 2)
+    {
+        const float* ch0 = buffer.getReadPointer(0);
+        const float* ch1 = buffer.getReadPointer(1);
+        float ch1Energy = 0.0f;
+        const int n = buffer.getNumSamples();
+        for (int i = 0; i < n; ++i)
+            ch1Energy += ch1[i] * ch1[i];
+        // If ch1 has less than -96dB of energy relative to being "empty", copy ch0
+        if (ch1Energy < 1e-10f)
+            buffer.copyFrom(1, 0, buffer, 0, 0, n);
+    }
 
     // Feed active parameters to engine
     engine.setTime(*apvts.getRawParameterValue("time"));

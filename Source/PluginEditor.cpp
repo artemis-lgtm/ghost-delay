@@ -92,6 +92,11 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     g.drawText("MIX",   374 - 40, labelY, 80, 14, juce::Justification::centred);
 
     // No bottom row labels
+
+    // Version label (small, bottom-right corner)
+    g.setColour(juce::Colour(0x44, 0x55, 0x55));
+    g.setFont(juce::FontOptions(9.0f));
+    g.drawText("v4.3", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
 }
 
 void GhostDelayEditor::resized()
