@@ -220,31 +220,37 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
     juce::AudioBuffer<float> dryBuffer;
     dryBuffer.makeCopyOf(buffer);
 
-    const int outChannels = buffer.getNumChannels();
-    const int mixChannels = std::min(outChannels, 2);
+    // Mono-sum the dry signal — fixes mono source only appearing in left channel
+    // When input is mono (or stereo with silent ch1), both output channels
+    // must get the same dry signal, otherwise mix=0 means audio left-only.
+    const float* drySrc0 = dryBuffer.getReadPointer(0);
+    const float* drySrc1 = (numChannels > 1) ? dryBuffer.getReadPointer(1) : drySrc0;
+
     float rms = 0.0f;
 
-    for (int ch = 0; ch < mixChannels; ++ch)
+    for (int s = 0; s < numSamples; ++s)
     {
-        const int dryCh = (ch < numChannels) ? ch : 0;
-        const float* dry = dryBuffer.getReadPointer(dryCh);
-        const int wetCh = std::min(ch, wetBuffer.getNumChannels() - 1);
-        const float* wet = wetBuffer.getReadPointer(wetCh);
-        float* out = buffer.getWritePointer(ch);
-        float& hp = (ch == 0) ? hpStateL : hpStateR;
+        float dryMono = (drySrc0[s] + drySrc1[s]) * 0.5f;
+        float wetL = wetBuffer.getSample(0, s);
+        float wetR = wetBuffer.getSample(1, s);
+        float mix = smoothReverbMix;
 
-        for (int s = 0; s < numSamples; ++s)
-        {
-            float m = dry[s] * (1.0f - smoothReverbMix) + wet[s] * smoothReverbMix;
+        float outL = dryMono * (1.0f - mix) + wetL * mix;
+        float outR = dryMono * (1.0f - mix) + wetR * mix;
 
-            // DC blocker (20 Hz HP)
-            float hpOut = m - hp;
-            hp = m - hpCoeff * hpOut;
-            out[s] = hpOut;
-            rms += out[s] * out[s];
-        }
+        // DC blocker (20 Hz HP)
+        float hpOutL = outL - hpStateL;
+        hpStateL = outL - hpCoeff * hpOutL;
+        float hpOutR = outR - hpStateR;
+        hpStateR = outR - hpCoeff * hpOutR;
+
+        buffer.setSample(0, s, hpOutL);
+        if (buffer.getNumChannels() > 1)
+            buffer.setSample(1, s, hpOutR);
+
+        rms += hpOutL * hpOutL + hpOutR * hpOutR;
     }
 
-    rms = std::sqrt(rms / (float)(numSamples * std::max(numChannels, 1)));
+    rms = std::sqrt(rms / (float)(numSamples * 2));
     rmsLevel.store(rms);
 }
