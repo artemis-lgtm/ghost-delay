@@ -4,17 +4,15 @@
 #include <array>
 #include <cmath>
 #include <atomic>
+#include "SpectralFreeze.h"
 
 /**
- * Ghost Delay v4.0 — Reverb-only focus
+ * Ghost Delay v5.0 — Reverb → Spectral Freeze
  *
- * Clean Valhalla-inspired 8-channel FDN reverb.
- * No Enigma/modulation section — perfecting reverb first.
+ * Signal chain: DRY → FDN Reverb → Spectral Freeze → MIX
  *
- * TOP ROW: SIZE, DECAY, TONE, MIX
- * BOTTOM ROW: (reserved, inactive)
- *
- * Bypass handled in PluginProcessor via APVTS bool parameter.
+ * TOP ROW:    SIZE, DECAY, TONE, MIX
+ * BOTTOM ROW: FREEZE, DRIFT, SCATTER, DEPTH
  */
 class GhostEngine
 {
@@ -33,11 +31,11 @@ public:
     void setDecay(float v)    { targetTone = v; }      // TONE
     void setTone(float v)     { targetReverbMix = v; } // MIX (repurposed)
 
-    // Inactive stubs (bottom row — reserved for future)
-    void setRate(float)   {}
-    void setDepth(float)  {}
-    void setSpread(float) {}
-    void setMix(float)    {}
+    // Bottom row — Spectral Freeze controls
+    void setRate(float v)   { targetFreezeAmt = v; }     // FREEZE
+    void setDepth(float v)  { targetFreezeDrift = v; }   // DRIFT
+    void setSpread(float v) { targetFreezeScatter = v; } // SCATTER
+    void setMix(float v)    { targetFreezeDepth = v; }   // DEPTH
 
     // UI queries
     float getSweepPosition() const  { return sweepPos.load(); }
@@ -171,4 +169,14 @@ private:
 
     // Hard-coded diffusion coefficient (good general-purpose value)
     static constexpr float DIFFUSION_COEFF = 0.6f;
+
+    // ═══════════════════════════════════════════════════════════
+    // SPECTRAL FREEZE (post-reverb processing)
+    // ═══════════════════════════════════════════════════════════
+    SpectralFreeze freezeL, freezeR;
+
+    float targetFreezeAmt     = 0.0f, smoothFreezeAmt     = 0.0f;
+    float targetFreezeDrift   = 0.0f, smoothFreezeDrift   = 0.0f;
+    float targetFreezeScatter = 0.0f, smoothFreezeScatter = 0.0f;
+    float targetFreezeDepth   = 0.0f, smoothFreezeDepth   = 0.0f;
 };

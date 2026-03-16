@@ -35,6 +35,8 @@ target_sources(GhostDelay
         Source/PluginEditor.h
         Source/GhostEngine.cpp
         Source/GhostEngine.h
+        Source/SpectralFreeze.cpp
+        Source/SpectralFreeze.h
         Source/GhostRenderer.cpp
         Source/GhostRenderer.h
         Source/FilmstripKnob.cpp

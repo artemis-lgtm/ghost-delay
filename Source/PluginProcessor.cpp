@@ -33,24 +33,22 @@ GhostDelayProcessor::createParameterLayout()
         juce::ParameterID("tone", 1), "MIX",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.35f));
 
-    // Bottom row (reserved, inactive — kept for preset compatibility)
+    // Bottom row — Spectral Freeze
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("rate", 1), "RATE",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
+        juce::ParameterID("rate", 1), "FREEZE",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // default off
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("depth", 1), "DEPTH",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
+        juce::ParameterID("depth", 1), "DRIFT",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));   // subtle drift
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("spread", 1), "SPREAD",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));
+        juce::ParameterID("spread", 1), "SCATTER",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // default off
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("mix", 1), "MIX_GLOBAL",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
-
-    // Reverb bypass removed — MIX knob at 0 provides clean pass-through
+        juce::ParameterID("mix", 1), "DEPTH",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));   // 50% freeze blend
 
     return { params.begin(), params.end() };
 }

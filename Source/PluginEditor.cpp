@@ -22,12 +22,23 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     knobTone  = makeKnob("TONE",  BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
     knobMix   = makeKnob("MIX",   BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
 
-    // Attach to APVTS (top row)
+    // Bottom row: FREEZE, DRIFT, SCATTER, DEPTH
+    knobFreeze  = makeKnob("FREEZE",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
+    knobDrift   = makeKnob("DRIFT",   BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
+    knobScatter = makeKnob("SCATTER", BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
+    knobDepth   = makeKnob("DEPTH",   BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
+
+    // Attach to APVTS
     auto& apvts = processor.getAPVTS();
     attSize  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "time",     *knobSize);
     attDecay = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "feedback", *knobDecay);
     attTone  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "decay",    *knobTone);
     attMix   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "tone",     *knobMix);
+
+    attFreeze  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "rate",   *knobFreeze);
+    attDrift   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "depth",  *knobDrift);
+    attScatter = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "spread", *knobScatter);
+    attDepth   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "mix",    *knobDepth);
 
     // Ghost renderer
     ghostRenderer.loadSpritesheet(
@@ -91,12 +102,17 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     g.drawText("TONE",  281 - 40, labelY, 80, 14, juce::Justification::centred);
     g.drawText("MIX",   374 - 40, labelY, 80, 14, juce::Justification::centred);
 
-    // No bottom row labels
+    // Bottom row labels (Spectral Freeze)
+    int labelY2 = 316;
+    g.drawText("FREEZE",  95 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("DRIFT",  188 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("SCATTER", 281 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("DEPTH",  374 - 40, labelY2, 80, 14, juce::Justification::centred);
 
     // Version label (small, bottom-right corner)
     g.setColour(juce::Colour(0x44, 0x55, 0x55));
     g.setFont(juce::FontOptions(9.0f));
-    g.drawText("v4.3", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
+    g.drawText("v5.0", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
 }
 
 void GhostDelayEditor::resized()
@@ -109,6 +125,12 @@ void GhostDelayEditor::resized()
     knobDecay ->setBounds(188 - hk, 177 - hk, ks, ks);
     knobTone  ->setBounds(281 - hk, 177 - hk, ks, ks);
     knobMix   ->setBounds(374 - hk, 177 - hk, ks, ks);
+
+    // Bottom row: FREEZE, DRIFT, SCATTER, DEPTH
+    knobFreeze  ->setBounds( 95 - hk, 272 - hk, ks, ks);
+    knobDrift   ->setBounds(188 - hk, 272 - hk, ks, ks);
+    knobScatter ->setBounds(281 - hk, 272 - hk, ks, ks);
+    knobDepth   ->setBounds(374 - hk, 272 - hk, ks, ks);
 
     // Ghost renderer
     ghostRenderer.setBounds(67, 387, 335, 103);

@@ -25,9 +25,13 @@ private:
     // Top row: SIZE, DECAY, TONE, MIX
     std::unique_ptr<FilmstripKnob> knobSize, knobDecay, knobTone, knobMix;
 
-    // APVTS attachments (top row only)
+    // Bottom row: FREEZE, DRIFT, SCATTER, DEPTH
+    std::unique_ptr<FilmstripKnob> knobFreeze, knobDrift, knobScatter, knobDepth;
+
+    // APVTS attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        attSize, attDecay, attTone, attMix;
+        attSize, attDecay, attTone, attMix,
+        attFreeze, attDrift, attScatter, attDepth;
 
     // Ghost animation
     GhostRenderer ghostRenderer;

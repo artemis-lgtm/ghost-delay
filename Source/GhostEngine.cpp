@@ -62,6 +62,14 @@ void GhostEngine::prepare(double sr, int blockSize)
 
     wetBuffer.setSize(2, blockSize);
     wetBuffer.clear();
+
+    // Spectral freeze
+    freezeL.prepare(sr);
+    freezeR.prepare(sr);
+    smoothFreezeAmt = targetFreezeAmt;
+    smoothFreezeDrift = targetFreezeDrift;
+    smoothFreezeScatter = targetFreezeScatter;
+    smoothFreezeDepth = targetFreezeDepth;
 }
 
 void GhostEngine::reset()
@@ -76,6 +84,7 @@ void GhostEngine::reset()
     }
     toneFiltL.reset(); toneFiltR.reset();
     hpStateL = hpStateR = 0.0f;
+    freezeL.reset(); freezeR.reset();
 }
 
 void GhostEngine::process(juce::AudioBuffer<float>& buffer,
@@ -215,7 +224,40 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         wetBuffer.setSample(1, s, reverbR);
     }
 
-    // ── 9. Mix dry/wet using reverb mix + DC block ──────────
+    // ── 9. Spectral Freeze (reverb → freeze chain) ────────
+    // Set freeze parameters from smoothed bottom-row values
+    freezeL.setFreeze(smoothFreezeAmt);
+    freezeL.setDrift(smoothFreezeDrift);
+    freezeL.setScatter(smoothFreezeScatter);
+    freezeR.setFreeze(smoothFreezeAmt);
+    freezeR.setDrift(smoothFreezeDrift);
+    freezeR.setScatter(smoothFreezeScatter);
+
+    // Process reverb output through spectral freeze, blend with DEPTH
+    for (int s = 0; s < numSamples; ++s)
+    {
+        // Smooth the depth/freeze params per-sample for click-free
+        smoothFreezeAmt     = smooth(smoothFreezeAmt,     targetFreezeAmt);
+        smoothFreezeDrift   = smooth(smoothFreezeDrift,   targetFreezeDrift);
+        smoothFreezeScatter = smooth(smoothFreezeScatter, targetFreezeScatter);
+        smoothFreezeDepth   = smooth(smoothFreezeDepth,   targetFreezeDepth);
+
+        float reverbL = wetBuffer.getSample(0, s);
+        float reverbR = wetBuffer.getSample(1, s);
+
+        float frozenL = freezeL.processSample(reverbL);
+        float frozenR = freezeR.processSample(reverbR);
+
+        // DEPTH blends: 0 = clean reverb only, 1 = full freeze effect
+        float depth = smoothFreezeDepth;
+        float blendL = reverbL * (1.0f - depth) + frozenL * depth;
+        float blendR = reverbR * (1.0f - depth) + frozenR * depth;
+
+        wetBuffer.setSample(0, s, blendL);
+        wetBuffer.setSample(1, s, blendR);
+    }
+
+    // ── 10. Mix dry/wet using reverb mix + DC block ─────────
     // Save dry signal first (prevents channel overwrite issues on mono sources)
     juce::AudioBuffer<float> dryBuffer;
     dryBuffer.makeCopyOf(buffer);
