@@ -29,9 +29,6 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     attTone  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "decay",    *knobTone);
     attMix   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "tone",     *knobMix);
 
-    // Bypass button bounds (to the left of top row knobs)
-    bypassBounds = { 12, 163, 38, 38 };
-
     // Ghost renderer
     ghostRenderer.loadSpritesheet(
         BinaryData::ghost_spritesheet_png,
@@ -58,14 +55,6 @@ void GhostDelayEditor::timerCallback()
     spectrumDisplay.setSweepFrequency(processor.getSweepFrequency());
     spectrumDisplay.setAudioLevel(processor.getCurrentRMSLevel());
 
-    // Check bypass state for repaint
-    bool active = *processor.getAPVTS().getRawParameterValue("reverb") > 0.5f;
-    if (active != lastBypassState)
-    {
-        lastBypassState = active;
-        repaint(bypassBounds);
-    }
-
     // Self-capture trigger
     juce::File trigger("/tmp/ghost_capture_trigger");
     if (trigger.existsAsFile())
@@ -75,15 +64,9 @@ void GhostDelayEditor::timerCallback()
     }
 }
 
-void GhostDelayEditor::mouseDown(const juce::MouseEvent& event)
+void GhostDelayEditor::mouseDown(const juce::MouseEvent&)
 {
-    if (bypassBounds.contains(event.getPosition()))
-    {
-        auto* param = processor.getAPVTS().getParameter("reverb");
-        float current = param->getValue();
-        param->setValueNotifyingHost(current > 0.5f ? 0.0f : 1.0f);
-        repaint(bypassBounds);
-    }
+    // No clickable UI elements outside knobs
 }
 
 void GhostDelayEditor::paint(juce::Graphics& g)
@@ -97,35 +80,6 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     // Ghost area (animated overlay)
     g.setColour(juce::Colour(0x1a, 0x4a, 0x3a));
     g.fillRect(69, 389, 331, 99);
-
-    // ── Bypass button ───────────────────────────────────────
-    bool active = *processor.getAPVTS().getRawParameterValue("reverb") > 0.5f;
-    auto teal = juce::Colour(0x0d, 0x94, 0x88);
-    auto btnF = bypassBounds.toFloat();
-
-    if (active)
-    {
-        // Glow halo
-        g.setColour(teal.withAlpha(0.25f));
-        g.fillRoundedRectangle(btnF.expanded(3), 10.0f);
-        // Button fill
-        g.setColour(teal);
-        g.fillRoundedRectangle(btnF, 8.0f);
-        // Label
-        g.setColour(juce::Colours::white);
-    }
-    else
-    {
-        // Dim button
-        g.setColour(juce::Colour(0x28, 0x28, 0x28));
-        g.fillRoundedRectangle(btnF, 8.0f);
-        g.setColour(juce::Colour(0x44, 0x44, 0x44));
-        g.drawRoundedRectangle(btnF, 8.0f, 1.0f);
-        // Dim label
-        g.setColour(juce::Colour(0x55, 0x55, 0x55));
-    }
-    g.setFont(juce::FontOptions(10.0f));
-    g.drawText("REV", bypassBounds, juce::Justification::centred);
 
     // ── Knob labels (top row only) ──────────────────────────
     g.setColour(juce::Colour(0xcc, 0xcc, 0xdd));

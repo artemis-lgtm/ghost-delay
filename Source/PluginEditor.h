@@ -29,10 +29,6 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         attSize, attDecay, attTone, attMix;
 
-    // Bypass button (custom drawn, linked to "reverb" APVTS param)
-    juce::Rectangle<int> bypassBounds;
-    bool lastBypassState = true;
-
     // Ghost animation
     GhostRenderer ghostRenderer;
 

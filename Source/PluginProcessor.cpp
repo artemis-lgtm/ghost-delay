@@ -50,9 +50,7 @@ GhostDelayProcessor::createParameterLayout()
         juce::ParameterID("mix", 1), "MIX_GLOBAL",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
 
-    // Reverb bypass (bool — true = reverb active)
-    params.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID("reverb", 1), "Reverb Active", true));
+    // Reverb bypass removed — MIX knob at 0 provides clean pass-through
 
     return { params.begin(), params.end() };
 }
@@ -71,11 +69,6 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                         juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
-
-    // Reverb bypass from APVTS
-    bool reverbActive = *apvts.getRawParameterValue("reverb") > 0.5f;
-    if (!reverbActive)
-        return;  // Clean pass-through
 
     // Feed active parameters to engine
     engine.setTime(*apvts.getRawParameterValue("time"));

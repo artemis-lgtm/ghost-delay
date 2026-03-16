@@ -156,19 +156,17 @@ private:
     static constexpr float modRates[FDN_ORDER] = {
         0.13f, 0.17f, 0.23f, 0.29f, 0.31f, 0.37f, 0.41f, 0.47f
     };
-    // Input distribution weights (stereo decorrelation)
-    static constexpr float inWeightL[FDN_ORDER] = {
-        0.50f, 0.35f, 0.25f, 0.15f, 0.10f, 0.20f, 0.30f, 0.40f
+    // Input distribution weights (mono-summed, then distributed)
+    static constexpr float inWeight[FDN_ORDER] = {
+        0.40f, 0.30f, 0.25f, 0.20f, 0.20f, 0.25f, 0.30f, 0.40f
     };
-    static constexpr float inWeightR[FDN_ORDER] = {
-        0.10f, 0.20f, 0.30f, 0.40f, 0.50f, 0.35f, 0.25f, 0.15f
-    };
-    // Output tap weights (negative values for stereo width)
+    // Output tap weights (positive only, symmetric sums for L/R balance)
+    // Different per-line emphasis creates stereo width without panning artifacts
     static constexpr float outWeightL[FDN_ORDER] = {
-        0.40f, 0.30f, 0.20f, 0.10f, -0.10f, -0.20f, 0.30f, 0.40f
+        0.40f, 0.30f, 0.20f, 0.10f, 0.10f, 0.20f, 0.30f, 0.40f
     };
     static constexpr float outWeightR[FDN_ORDER] = {
-        -0.10f, 0.20f, 0.30f, 0.40f, 0.40f, 0.30f, -0.20f, 0.10f
+        0.10f, 0.20f, 0.30f, 0.40f, 0.40f, 0.30f, 0.20f, 0.10f
     };
 
     // Hard-coded diffusion coefficient (good general-purpose value)

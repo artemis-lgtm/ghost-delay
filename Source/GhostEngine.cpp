@@ -5,8 +5,7 @@ constexpr int   GhostEngine::baseLens[FDN_ORDER];
 constexpr int   GhostEngine::diffLens[NUM_DIFFUSERS];
 constexpr int   GhostEngine::fdnAPLens[FDN_ORDER];
 constexpr float GhostEngine::modRates[FDN_ORDER];
-constexpr float GhostEngine::inWeightL[FDN_ORDER];
-constexpr float GhostEngine::inWeightR[FDN_ORDER];
+constexpr float GhostEngine::inWeight[FDN_ORDER];
 constexpr float GhostEngine::outWeightL[FDN_ORDER];
 constexpr float GhostEngine::outWeightR[FDN_ORDER];
 
@@ -135,8 +134,12 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         float inL = (numChannels > 0) ? buffer.getSample(0, s) : 0.0f;
         float inR = (numChannels > 1) ? buffer.getSample(1, s) : inL;
 
+        // Sum to mono for reverb input (prevents L/R separation artifacts)
+        float inMono = (inL + inR) * 0.5f;
+
         // ── 1. Input diffusion (fixed coefficient) ──────────
-        float dL = inL, dR = inR;
+        // Feed mono into both diffusion chains for stereo decorrelation
+        float dL = inMono, dR = inMono;
         for (int d = 0; d < NUM_DIFFUSERS; ++d)
         {
             float modD = baseModDepth * ((float)diffLens[d] / 521.0f);
@@ -185,8 +188,8 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
             // Soft-clip in feedback to prevent runaway
             fb = std::tanh(fb);
 
-            // Inject diffused input into each delay line
-            float inputSig = dL * inWeightL[i] + dR * inWeightR[i];
+            // Inject diffused input into each delay line (mono-summed, balanced)
+            float inputSig = (dL + dR) * 0.5f * inWeight[i];
             fdn[i].write(fb + inputSig);
         }
 
@@ -213,6 +216,10 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
     }
 
     // ── 9. Mix dry/wet using reverb mix + DC block ──────────
+    // Save dry signal first (prevents channel overwrite issues on mono sources)
+    juce::AudioBuffer<float> dryBuffer;
+    dryBuffer.makeCopyOf(buffer);
+
     const int outChannels = buffer.getNumChannels();
     const int mixChannels = std::min(outChannels, 2);
     float rms = 0.0f;
@@ -220,7 +227,7 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
     for (int ch = 0; ch < mixChannels; ++ch)
     {
         const int dryCh = (ch < numChannels) ? ch : 0;
-        const float* dry = buffer.getReadPointer(dryCh);
+        const float* dry = dryBuffer.getReadPointer(dryCh);
         const int wetCh = std::min(ch, wetBuffer.getNumChannels() - 1);
         const float* wet = wetBuffer.getReadPointer(wetCh);
         float* out = buffer.getWritePointer(ch);
