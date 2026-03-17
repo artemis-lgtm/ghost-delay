@@ -106,9 +106,9 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     engine.setDecay(*apvts.getRawParameterValue("decay"));
     engine.setTone(*apvts.getRawParameterValue("tone"));
 
-    // Bottom row params not used but safe to call (stubs)
-    engine.setRate(*apvts.getRawParameterValue("rate"));
-    engine.setDepth(*apvts.getRawParameterValue("depth"));
+    // Bottom row — Spectral Freeze
+    engine.setRate(*apvts.getRawParameterValue("rate"));       // FREEZE
+    engine.setDepth(*apvts.getRawParameterValue("depth"));     // DRIFT
     engine.setSpread(*apvts.getRawParameterValue("spread"));
     engine.setMix(*apvts.getRawParameterValue("mix"));
 
