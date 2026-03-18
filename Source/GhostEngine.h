@@ -4,15 +4,15 @@
 #include <array>
 #include <cmath>
 #include <atomic>
-#include "SpectralFreeze.h"
+#include "EnigmaFilter.h"
 
 /**
- * Ghost Delay v5.0 — Reverb → Spectral Freeze
+ * Ghost Delay v6.0 — Reverb → Enigma Filter
  *
- * Signal chain: DRY → FDN Reverb → Spectral Freeze → MIX
+ * Signal chain: DRY → FDN Reverb → Enigma Phaser → MIX
  *
  * TOP ROW:    SIZE, DECAY, TONE, MIX
- * BOTTOM ROW: FREEZE, DRIFT, SCATTER, DEPTH
+ * BOTTOM ROW: DEPTH, FEEDBACK, RATE, ENIGMA MIX
  */
 class GhostEngine
 {
@@ -31,11 +31,11 @@ public:
     void setDecay(float v)    { targetTone = v; }      // TONE
     void setTone(float v)     { targetReverbMix = v; } // MIX (repurposed)
 
-    // Bottom row — Spectral Freeze controls
-    void setRate(float v)   { targetFreezeAmt = v; }     // FREEZE
-    void setDepth(float v)  { targetFreezeDrift = v; }   // DRIFT
-    void setSpread(float v) { targetFreezeScatter = v; } // SCATTER
-    void setMix(float v)    { targetFreezeDepth = v; }   // DEPTH
+    // Bottom row — Enigma filter controls
+    void setRate(float v)   { targetEnigmaDepth = v; }     // DEPTH (sweep width)
+    void setDepth(float v)  { targetEnigmaFeedback = v; }  // FEEDBACK (resonance)
+    void setSpread(float v) { targetEnigmaRate = v; }      // RATE (wobble speed)
+    void setMix(float v)    { targetEnigmaMix = v; }       // MIX (effect blend)
 
     // UI queries
     float getSweepPosition() const  { return sweepPos.load(); }
@@ -171,12 +171,12 @@ private:
     static constexpr float DIFFUSION_COEFF = 0.6f;
 
     // ═══════════════════════════════════════════════════════════
-    // SPECTRAL FREEZE (post-reverb processing)
+    // ENIGMA FILTER (post-reverb modulation)
     // ═══════════════════════════════════════════════════════════
-    SpectralFreeze freezeL, freezeR;
+    EnigmaFilter enigmaL, enigmaR;
 
-    float targetFreezeAmt     = 0.0f, smoothFreezeAmt     = 0.0f;
-    float targetFreezeDrift   = 0.0f, smoothFreezeDrift   = 0.0f;
-    float targetFreezeScatter = 0.0f, smoothFreezeScatter = 0.0f;
-    float targetFreezeDepth   = 0.0f, smoothFreezeDepth   = 0.0f;
+    float targetEnigmaDepth    = 0.5f, smoothEnigmaDepth    = 0.5f;
+    float targetEnigmaFeedback = 0.3f, smoothEnigmaFeedback = 0.3f;
+    float targetEnigmaRate     = 0.3f, smoothEnigmaRate     = 0.3f;
+    float targetEnigmaMix      = 0.0f, smoothEnigmaMix      = 0.0f;
 };

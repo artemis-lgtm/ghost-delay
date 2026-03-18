@@ -33,22 +33,22 @@ GhostDelayProcessor::createParameterLayout()
         juce::ParameterID("tone", 1), "MIX",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.35f));
 
-    // Bottom row — Spectral Freeze
+    // Bottom row — Enigma Filter
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("rate", 1), "FREEZE",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // default off
+        juce::ParameterID("rate", 1), "DEPTH",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));   // sweep width
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("depth", 1), "DRIFT",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));   // subtle drift
+        juce::ParameterID("depth", 1), "FDBK",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));   // resonance
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("spread", 1), "SCATTER",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // default off
+        juce::ParameterID("spread", 1), "RATE",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));   // wobble speed
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("mix", 1), "DEPTH",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));   // 50% freeze blend
+        juce::ParameterID("mix", 1), "MIX",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // enigma blend (off by default)
 
     return { params.begin(), params.end() };
 }
@@ -106,11 +106,11 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     engine.setDecay(*apvts.getRawParameterValue("decay"));
     engine.setTone(*apvts.getRawParameterValue("tone"));
 
-    // Bottom row — Spectral Freeze
-    engine.setRate(*apvts.getRawParameterValue("rate"));       // FREEZE
-    engine.setDepth(*apvts.getRawParameterValue("depth"));     // DRIFT
-    engine.setSpread(*apvts.getRawParameterValue("spread"));
-    engine.setMix(*apvts.getRawParameterValue("mix"));
+    // Bottom row — Enigma Filter
+    engine.setRate(*apvts.getRawParameterValue("rate"));       // DEPTH
+    engine.setDepth(*apvts.getRawParameterValue("depth"));     // FDBK
+    engine.setSpread(*apvts.getRawParameterValue("spread"));   // RATE
+    engine.setMix(*apvts.getRawParameterValue("mix"));         // MIX
 
     engine.process(buffer, getPlayHead());
 }

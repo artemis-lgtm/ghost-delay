@@ -22,11 +22,11 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     knobTone  = makeKnob("TONE",  BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
     knobMix   = makeKnob("MIX",   BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
 
-    // Bottom row: FREEZE, DRIFT, SCATTER, DEPTH
-    knobFreeze  = makeKnob("FREEZE",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
-    knobDrift   = makeKnob("DRIFT",   BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
-    knobScatter = makeKnob("SCATTER", BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
-    knobDepth   = makeKnob("DEPTH",   BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
+    // Bottom row: DEPTH, FDBK, RATE, MIX (Enigma filter)
+    knobFreeze  = makeKnob("DEPTH",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
+    knobDrift   = makeKnob("FDBK",   BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
+    knobScatter = makeKnob("RATE",   BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
+    knobDepth   = makeKnob("MIX",    BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
 
     // Attach to APVTS
     auto& apvts = processor.getAPVTS();
@@ -102,17 +102,17 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     g.drawText("TONE",  281 - 40, labelY, 80, 14, juce::Justification::centred);
     g.drawText("MIX",   374 - 40, labelY, 80, 14, juce::Justification::centred);
 
-    // Bottom row labels (Spectral Freeze)
+    // Bottom row labels (Enigma filter)
     int labelY2 = 316;
-    g.drawText("FREEZE",  95 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("DRIFT",  188 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("SCATTER", 281 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("DEPTH",  374 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("DEPTH",   95 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("FDBK",   188 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("RATE",   281 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("MIX",    374 - 40, labelY2, 80, 14, juce::Justification::centred);
 
     // Version label (small, bottom-right corner)
     g.setColour(juce::Colour(0x44, 0x55, 0x55));
     g.setFont(juce::FontOptions(9.0f));
-    g.drawText("v5.0", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
+    g.drawText("v6.0", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
 }
 
 void GhostDelayEditor::resized()

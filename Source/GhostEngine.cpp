@@ -63,13 +63,14 @@ void GhostEngine::prepare(double sr, int blockSize)
     wetBuffer.setSize(2, blockSize);
     wetBuffer.clear();
 
-    // Spectral freeze
-    freezeL.prepare(sr);
-    freezeR.prepare(sr);
-    smoothFreezeAmt = targetFreezeAmt;
-    smoothFreezeDrift = targetFreezeDrift;
-    smoothFreezeScatter = targetFreezeScatter;
-    smoothFreezeDepth = targetFreezeDepth;
+    // Enigma filter
+    enigmaL.prepare(sr);
+    enigmaR.prepare(sr);
+    enigmaR.setPhaseOffset(0.25);  // 90-degree stereo offset
+    smoothEnigmaDepth = targetEnigmaDepth;
+    smoothEnigmaFeedback = targetEnigmaFeedback;
+    smoothEnigmaRate = targetEnigmaRate;
+    smoothEnigmaMix = targetEnigmaMix;
 }
 
 void GhostEngine::reset()
@@ -84,7 +85,7 @@ void GhostEngine::reset()
     }
     toneFiltL.reset(); toneFiltR.reset();
     hpStateL = hpStateR = 0.0f;
-    freezeL.reset(); freezeR.reset();
+    enigmaL.reset(); enigmaR.reset();
 }
 
 void GhostEngine::process(juce::AudioBuffer<float>& buffer,
@@ -224,54 +225,31 @@ void GhostEngine::process(juce::AudioBuffer<float>& buffer,
         wetBuffer.setSample(1, s, reverbR);
     }
 
-    // ── 9. Spectral Freeze (reverb → freeze chain) ────────
-    // BYPASS freeze entirely when both freeze amount and depth are negligible.
-    // The FFT introduces ~1536 samples of latency; blending it with the
-    // un-delayed reverb creates comb-filter buzzing.  Skip the whole path
-    // when the user isn't actively using freeze.
-    bool freezeActive = (targetFreezeAmt > 0.02f || smoothFreezeAmt > 0.02f)
-                     && (targetFreezeDepth > 0.02f || smoothFreezeDepth > 0.02f);
-
-    if (freezeActive)
+    // ── 9. Enigma Filter (post-reverb modulated phaser) ────
+    // No latency — allpass cascade is sample-accurate, safe to blend
+    for (int s = 0; s < numSamples; ++s)
     {
-        freezeL.setFreeze(smoothFreezeAmt);
-        freezeL.setDrift(smoothFreezeDrift);
-        freezeL.setScatter(smoothFreezeScatter);
-        freezeR.setFreeze(smoothFreezeAmt);
-        freezeR.setDrift(smoothFreezeDrift);
-        freezeR.setScatter(smoothFreezeScatter);
+        smoothEnigmaDepth    = smooth(smoothEnigmaDepth,    targetEnigmaDepth);
+        smoothEnigmaFeedback = smooth(smoothEnigmaFeedback, targetEnigmaFeedback);
+        smoothEnigmaRate     = smooth(smoothEnigmaRate,     targetEnigmaRate);
+        smoothEnigmaMix      = smooth(smoothEnigmaMix,      targetEnigmaMix);
 
-        for (int s = 0; s < numSamples; ++s)
-        {
-            smoothFreezeAmt     = smooth(smoothFreezeAmt,     targetFreezeAmt);
-            smoothFreezeDrift   = smooth(smoothFreezeDrift,   targetFreezeDrift);
-            smoothFreezeScatter = smooth(smoothFreezeScatter, targetFreezeScatter);
-            smoothFreezeDepth   = smooth(smoothFreezeDepth,   targetFreezeDepth);
+        float wetL = wetBuffer.getSample(0, s);
+        float wetR = wetBuffer.getSample(1, s);
 
-            float reverbL = wetBuffer.getSample(0, s);
-            float reverbR = wetBuffer.getSample(1, s);
+        float engL = enigmaL.processSample(wetL, smoothEnigmaDepth,
+                                           smoothEnigmaFeedback,
+                                           smoothEnigmaRate,
+                                           hostBPM, hostPlaying);
+        float engR = enigmaR.processSample(wetR, smoothEnigmaDepth,
+                                           smoothEnigmaFeedback,
+                                           smoothEnigmaRate,
+                                           hostBPM, hostPlaying);
 
-            float frozenL = freezeL.processSample(reverbL);
-            float frozenR = freezeR.processSample(reverbR);
-
-            // When freeze is active, use full replacement (not blend)
-            // to avoid comb-filter artifacts from latency mismatch
-            float depth = smoothFreezeDepth;
-            float blendL = reverbL * (1.0f - depth) + frozenL * depth;
-            float blendR = reverbR * (1.0f - depth) + frozenR * depth;
-
-            wetBuffer.setSample(0, s, blendL);
-            wetBuffer.setSample(1, s, blendR);
-        }
-    }
-    else
-    {
-        // Keep smoothers moving toward zero so we fade out cleanly
-        for (int s = 0; s < numSamples; ++s)
-        {
-            smoothFreezeAmt   = smooth(smoothFreezeAmt,   targetFreezeAmt);
-            smoothFreezeDepth = smooth(smoothFreezeDepth, targetFreezeDepth);
-        }
+        // Mix: 0 = clean reverb, 1 = full enigma effect
+        float emix = smoothEnigmaMix;
+        wetBuffer.setSample(0, s, wetL * (1.0f - emix) + engL * emix);
+        wetBuffer.setSample(1, s, wetR * (1.0f - emix) + engR * emix);
     }
 
     // ── 10. Mix dry/wet using reverb mix + DC block ─────────
