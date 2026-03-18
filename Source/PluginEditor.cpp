@@ -22,11 +22,11 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     knobTone  = makeKnob("TONE",  BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
     knobMix   = makeKnob("MIX",   BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
 
-    // Bottom row: DEPTH, FDBK, RATE, MIX (Enigma filter)
-    knobFreeze  = makeKnob("DEPTH",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
-    knobDrift   = makeKnob("FDBK",   BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
-    knobScatter = makeKnob("RATE",   BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
-    knobDepth   = makeKnob("MIX",    BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
+    // Bottom row: RANGE, CHARACTER, RATE, MIX (Enigma filter)
+    knobFreeze  = makeKnob("RANGE",     BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
+    knobDrift   = makeKnob("CHARACTER", BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
+    knobScatter = makeKnob("RATE",      BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
+    knobDepth   = makeKnob("MIX",       BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
 
     // Attach to APVTS
     auto& apvts = processor.getAPVTS();
@@ -104,10 +104,10 @@ void GhostDelayEditor::paint(juce::Graphics& g)
 
     // Bottom row labels (Enigma filter)
     int labelY2 = 316;
-    g.drawText("DEPTH",   95 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("FDBK",   188 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("RATE",   281 - 40, labelY2, 80, 14, juce::Justification::centred);
-    g.drawText("MIX",    374 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("RANGE",     95 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("CHARACTER",188 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("RATE",     281 - 40, labelY2, 80, 14, juce::Justification::centred);
+    g.drawText("MIX",     374 - 40, labelY2, 80, 14, juce::Justification::centred);
 
     // Version label (small, bottom-right corner)
     g.setColour(juce::Colour(0x44, 0x55, 0x55));
