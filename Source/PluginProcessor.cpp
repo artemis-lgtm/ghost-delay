@@ -33,22 +33,22 @@ GhostDelayProcessor::createParameterLayout()
         juce::ParameterID("tone", 1), "MIX",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.35f));
 
-    // Bottom row — Enigma Filter
+    // Bottom row — reverb-native effects (legacy param IDs kept for state compat)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("rate", 1), "DEPTH",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));   // sweep width
+        juce::ParameterID("rate", 1), "SHIMMER",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // octave-up tail regen
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("depth", 1), "FDBK",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));   // resonance
+        juce::ParameterID("depth", 1), "DUCK",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // input ducks the wet
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("spread", 1), "RATE",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));   // wobble speed
+        juce::ParameterID("spread", 1), "WIDTH",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.667f)); // M/S width 0..150%
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("mix", 1), "MIX",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // enigma blend (off by default)
+        juce::ParameterID("mix", 1), "GRIT",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // wet saturation + darken
 
     return { params.begin(), params.end() };
 }
@@ -73,6 +73,11 @@ bool GhostDelayProcessor::isBusesLayoutSupported(const BusesLayout& layouts) con
 void GhostDelayProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     engine.prepare(sampleRate, samplesPerBlock);
+
+    // ~5ms per scope bin regardless of sample rate -> full ring covers ~1.3s
+    scopeChunk = juce::jmax(64, (int) (sampleRate * 0.005));
+    scopeAccumCount = 0;
+    scopeAccumPeak = 0.0f;
 }
 
 void GhostDelayProcessor::releaseResources()
@@ -85,34 +90,61 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
 
-    // FORCE STEREO: If input is mono (ch1 silent or missing), duplicate ch0 to ch1
-    // This fixes the #1 user-reported bug: mono sources producing left-only dry audio
+    // FORCE STEREO with hysteresis: if input is mono (ch1 silent), duplicate
+    // ch0 to ch1. Latched with a hold timer so the copy doesn't flicker on/off
+    // block-to-block when ch1 hovers near the threshold (v6 click source #4).
     if (buffer.getNumChannels() >= 2)
     {
-        const float* ch0 = buffer.getReadPointer(0);
         const float* ch1 = buffer.getReadPointer(1);
         float ch1Energy = 0.0f;
         const int n = buffer.getNumSamples();
         for (int i = 0; i < n; ++i)
             ch1Energy += ch1[i] * ch1[i];
-        // If ch1 has less than -96dB of energy relative to being "empty", copy ch0
-        if (ch1Energy < 1e-10f)
+
+        if (ch1Energy > 1e-8f)
+            stereoHoldBlocks = 200;            // ~2s at 512/44.1k: stay stereo
+        else if (stereoHoldBlocks > 0)
+            --stereoHoldBlocks;
+
+        if (stereoHoldBlocks == 0)
             buffer.copyFrom(1, 0, buffer, 0, 0, n);
     }
 
-    // Feed active parameters to engine
-    engine.setTime(*apvts.getRawParameterValue("time"));
-    engine.setFeedback(*apvts.getRawParameterValue("feedback"));
-    engine.setDecay(*apvts.getRawParameterValue("decay"));
-    engine.setTone(*apvts.getRawParameterValue("tone"));
+    // Top row
+    engine.setSize(*apvts.getRawParameterValue("time"));
+    engine.setDecay(*apvts.getRawParameterValue("feedback"));
+    engine.setTone(*apvts.getRawParameterValue("decay"));
+    engine.setMix(*apvts.getRawParameterValue("tone"));
 
-    // Bottom row — Enigma Filter
-    engine.setRate(*apvts.getRawParameterValue("rate"));       // DEPTH
-    engine.setDepth(*apvts.getRawParameterValue("depth"));     // FDBK
-    engine.setSpread(*apvts.getRawParameterValue("spread"));   // RATE
-    engine.setMix(*apvts.getRawParameterValue("mix"));         // MIX
+    // Bottom row
+    engine.setShimmer(*apvts.getRawParameterValue("rate"));
+    engine.setDuck(*apvts.getRawParameterValue("depth"));
+    engine.setWidth(*apvts.getRawParameterValue("spread"));
+    engine.setGrit(*apvts.getRawParameterValue("mix"));
 
     engine.process(buffer, getPlayHead());
+
+    // Feed the scope ring (post-engine, so the LED screen shows the output)
+    {
+        const int n = buffer.getNumSamples();
+        const int nCh = buffer.getNumChannels();
+        for (int i = 0; i < n; ++i)
+        {
+            float s = 0.0f;
+            for (int ch = 0; ch < nCh; ++ch)
+                s = juce::jmax(s, std::abs(buffer.getSample(ch, i)));
+            scopeAccumPeak = juce::jmax(scopeAccumPeak, s);
+            if (++scopeAccumCount >= scopeChunk)
+            {
+                const int w = scopeWrite.load(std::memory_order_relaxed);
+                scope[(size_t) (w & (scopeSize - 1))].store(scopeAccumPeak,
+                                                            std::memory_order_relaxed);
+                scopeWrite.store(w + 1, std::memory_order_relaxed);
+                scopeAccumCount = 0;
+                scopeAccumPeak = 0.0f;
+            }
+        }
+    }
 }
 
 void GhostDelayProcessor::getStateInformation(juce::MemoryBlock& destData)

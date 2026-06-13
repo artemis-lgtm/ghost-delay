@@ -4,15 +4,23 @@
 #include <array>
 #include <cmath>
 #include <atomic>
-#include "EnigmaFilter.h"
 
 /**
- * Ghost Delay v6.0 — Reverb → Enigma Filter
+ * Ghost Reverb v7.0 — dedicated FDN reverb
  *
- * Signal chain: DRY → FDN Reverb → Enigma Phaser → MIX
+ * Signal chain: DRY → diffusion → 8-line FDN (w/ shimmer return) → TONE
+ *               → GRIT → WIDTH → DUCK → MIX
  *
  * TOP ROW:    SIZE, DECAY, TONE, MIX
- * BOTTOM ROW: DEPTH, FEEDBACK, RATE, ENIGMA MIX
+ * BOTTOM ROW: SHIMMER, DUCK, WIDTH, GRIT
+ *
+ * v7.0 audit fixes (council pass 2026-06-11):
+ *  - FDN delay lines: fixed wrap at MAX_DELAY + smoothed fractional read tap
+ *    (was: per-sample integer `% len` re-wrap → stale-buffer clicks)
+ *  - fbGain capped 0.96, line mod depth capped 4 samples, per-line tanh
+ *    removed (was: pinned at tanh knee at max DECAY → "blown out" screech)
+ *  - No heap allocation on the audio thread (dry copy eliminated)
+ *  - MIX applied with per-sample smoothing at the application point
  */
 class GhostEngine
 {
@@ -25,32 +33,34 @@ public:
                  juce::AudioPlayHead* playHead);
     void reset();
 
-    // Active parameters (top row)
-    void setTime(float v)     { targetSize = v; }      // SIZE
-    void setFeedback(float v) { targetDecay = v; }     // DECAY
-    void setDecay(float v)    { targetTone = v; }      // TONE
-    void setTone(float v)     { targetReverbMix = v; } // MIX (repurposed)
+    // Top row
+    void setSize(float v)  { targetSize = v; }
+    void setDecay(float v) { targetDecay = v; }
+    void setTone(float v)  { targetTone = v; }
+    void setMix(float v)   { targetMix = v; }
 
-    // Bottom row — Enigma filter controls
-    void setRate(float v)   { targetEnigmaDepth = v; }     // DEPTH (sweep width)
-    void setDepth(float v)  { targetEnigmaFeedback = v; }  // FEEDBACK (resonance)
-    void setSpread(float v) { targetEnigmaRate = v; }      // RATE (wobble speed)
-    void setMix(float v)    { targetEnigmaMix = v; }       // MIX (effect blend)
+    // Bottom row — reverb-native effects
+    void setShimmer(float v) { targetShimmer = v; }  // octave-up tail regen
+    void setDuck(float v)    { targetDuck = v; }     // input ducks the wet
+    void setWidth(float v)   { targetWidth = v; }    // M/S width 0..150%
+    void setGrit(float v)    { targetGrit = v; }     // wet saturation + darken
 
     // UI queries
-    float getSweepPosition() const  { return sweepPos.load(); }
-    float getSweepFrequency() const { return sweepFreq.load(); }
     float getCurrentRMSLevel() const { return rmsLevel.load(); }
 
 private:
     // ═══════════════════════════════════════════════════════════
     // PARAMETER SMOOTHING (~30ms prevents clicks on knob moves)
     // ═══════════════════════════════════════════════════════════
-    float targetSize = 0.5f, targetDecay = 0.5f;
-    float targetTone = 0.5f, targetReverbMix = 0.5f;
+    float targetSize = 0.5f,  targetDecay = 0.4f;
+    float targetTone = 0.6f,  targetMix = 0.35f;
+    float targetShimmer = 0.0f, targetDuck = 0.0f;
+    float targetWidth = 0.667f, targetGrit = 0.0f;
 
-    float smoothSize = 0.5f, smoothDecay = 0.5f;
-    float smoothTone = 0.5f, smoothReverbMix = 0.5f;
+    float smoothSize = 0.5f,  smoothDecay = 0.4f;
+    float smoothTone = 0.6f,  smoothMix = 0.35f;
+    float smoothShimmer = 0.0f, smoothDuck = 0.0f;
+    float smoothWidth = 0.667f, smoothGrit = 0.0f;
 
     float smoothCoeff = 0.999f;
 
@@ -60,21 +70,36 @@ private:
     }
 
     // ═══════════════════════════════════════════════════════════
-    // 8-CHANNEL FDN REVERB (Valhalla-inspired)
+    // 8-CHANNEL FDN REVERB
+    // Delay lines wrap at MAX_DELAY always; the *read tap* is a
+    // smoothed fractional offset. Changing SIZE moves the tap, it
+    // never re-wraps the buffer (the v6 click bug).
     // ═══════════════════════════════════════════════════════════
     static constexpr int FDN_ORDER = 8;
-    static constexpr int MAX_DELAY = 12000;
+    static constexpr int MAX_DELAY = 16384;   // power of two for cheap wrap
 
     struct DelayLine
     {
         std::array<float, MAX_DELAY> buf {};
-        int wp = 0, len = 1000;
+        int wp = 0;
         void clear() { buf.fill(0.0f); wp = 0; }
-        void write(float s) { buf[wp] = s; wp = (wp + 1) % len; }
-        float read() const { return buf[wp]; }
+        void write(float s) { buf[(size_t)wp] = s; wp = (wp + 1) & (MAX_DELAY - 1); }
+        // Fractional read: delay measured in samples back from the NEXT
+        // write position (so delay D reads the sample written D samples ago).
+        float read(float delaySamples) const
+        {
+            float rp = (float)wp - delaySamples;
+            if (rp < 0.0f) rp += (float)MAX_DELAY;
+            int i0 = (int)rp;
+            int i1 = (i0 + 1) & (MAX_DELAY - 1);
+            float f = rp - (float)i0;
+            return buf[(size_t)(i0 & (MAX_DELAY - 1))] * (1.0f - f)
+                 + buf[(size_t)i1] * f;
+        }
     };
 
     std::array<DelayLine, FDN_ORDER> fdn;
+    std::array<float, FDN_ORDER> fdnDelay {};       // smoothed fractional delay per line
 
     // Absorption filter (one-pole LP per delay line in feedback loop)
     struct AbsFilter { float s = 0.0f; void reset() { s = 0.0f; } };
@@ -103,9 +128,9 @@ private:
             if (rp < 0.0f) rp += (float)MAX_AP;
             int i0 = (int)rp, i1 = (i0 + 1) % MAX_AP;
             float f = rp - (float)i0;
-            float delayed = buf[i0 % MAX_AP] * (1.0f - f) + buf[i1] * f;
+            float delayed = buf[(size_t)(i0 % MAX_AP)] * (1.0f - f) + buf[(size_t)i1] * f;
             float out = in * (-coeff) + delayed;
-            buf[wp] = in + delayed * coeff;
+            buf[(size_t)wp] = in + delayed * coeff;
             wp = (wp + 1) % MAX_AP;
             return out;
         }
@@ -130,17 +155,48 @@ private:
     ToneFilter toneFiltL, toneFiltR;
 
     // ═══════════════════════════════════════════════════════════
+    // SHIMMER — dual-tap granular octave-up shifter on the tail,
+    // returned into the tank input. No FFT, two interpolated reads.
+    // ═══════════════════════════════════════════════════════════
+    static constexpr int SHIM_BUF = 8192;        // power of two
+    std::array<float, SHIM_BUF> shimBuf {};
+    int   shimWp = 0;
+    float shimPhase = 0.0f;
+    float shimWindow = 2048.0f;                  // samples, set in prepare()
+    float shimOut = 0.0f;                        // previous-sample output (loop-safe)
+
+    float shimmerRead(float delaySamples) const
+    {
+        float rp = (float)shimWp - std::max(delaySamples, 1.0f);
+        if (rp < 0.0f) rp += (float)SHIM_BUF;
+        int i0 = (int)rp, i1 = (i0 + 1) & (SHIM_BUF - 1);
+        float f = rp - (float)i0;
+        return shimBuf[(size_t)(i0 & (SHIM_BUF - 1))] * (1.0f - f)
+             + shimBuf[(size_t)i1] * f;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // DUCK — envelope follower on the dry input gates the wet
+    // ═══════════════════════════════════════════════════════════
+    float duckEnv = 0.0f;
+    float duckAttack = 0.0f, duckRelease = 0.0f;  // coeffs set in prepare()
+    float duckGainSm = 1.0f;                      // smoothed gain (anti-zipper)
+
+    // ═══════════════════════════════════════════════════════════
+    // GRIT — wet drive + progressive darkening
+    // ═══════════════════════════════════════════════════════════
+    ToneFilter gritLpL, gritLpR;
+
+    // ═══════════════════════════════════════════════════════════
     // COMMON
     // ═══════════════════════════════════════════════════════════
     float hpStateL = 0.0f, hpStateR = 0.0f, hpCoeff = 0.0f;
     juce::AudioBuffer<float> wetBuffer;
     double hostBPM = 120.0;
     bool hostPlaying = false;
-    double ppqPosition = 0.0;
-    bool hasPPQ = false;
     double sampleRate = 44100.0;
 
-    std::atomic<float> sweepPos{0.0f}, sweepFreq{200.0f}, rmsLevel{0.0f};
+    std::atomic<float> rmsLevel{0.0f};
 
     // FDN delay lengths (mutually prime, samples at 44.1kHz)
     static constexpr int baseLens[FDN_ORDER] = {
@@ -159,7 +215,6 @@ private:
         0.40f, 0.30f, 0.25f, 0.20f, 0.20f, 0.25f, 0.30f, 0.40f
     };
     // Output tap weights (positive only, symmetric sums for L/R balance)
-    // Different per-line emphasis creates stereo width without panning artifacts
     static constexpr float outWeightL[FDN_ORDER] = {
         0.40f, 0.30f, 0.20f, 0.10f, 0.10f, 0.20f, 0.30f, 0.40f
     };
@@ -167,16 +222,9 @@ private:
         0.10f, 0.20f, 0.30f, 0.40f, 0.40f, 0.30f, 0.20f, 0.10f
     };
 
-    // Hard-coded diffusion coefficient (good general-purpose value)
     static constexpr float DIFFUSION_COEFF = 0.6f;
 
-    // ═══════════════════════════════════════════════════════════
-    // ENIGMA FILTER (post-reverb modulation)
-    // ═══════════════════════════════════════════════════════════
-    EnigmaFilter enigmaL, enigmaR;
-
-    float targetEnigmaDepth    = 0.5f, smoothEnigmaDepth    = 0.5f;
-    float targetEnigmaFeedback = 0.3f, smoothEnigmaFeedback = 0.3f;
-    float targetEnigmaRate     = 0.3f, smoothEnigmaRate     = 0.3f;
-    float targetEnigmaMix      = 0.0f, smoothEnigmaMix      = 0.0f;
+    // Stability: max feedback gain (was 0.985 — sat at the tanh knee and
+    // screeched; 0.96 + time-varying allpasses stays musical and stable)
+    static constexpr float MAX_FB = 0.96f;
 };

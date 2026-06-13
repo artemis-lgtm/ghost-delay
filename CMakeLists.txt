@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(GhostDelay VERSION 6.0.0)
+project(GhostDelay VERSION 7.0.0)
 
 # Find JUCE (expects JUCE installed or fetched)
 find_package(JUCE CONFIG QUIET)
@@ -18,7 +18,7 @@ juce_add_plugin(GhostDelay
     PLUGIN_MANUFACTURER_CODE Ghst
     PLUGIN_CODE Gdly
     FORMATS AU VST3 Standalone
-    PRODUCT_NAME "Ghost Delay"
+    PRODUCT_NAME "Ghost Machine"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
@@ -35,13 +35,11 @@ target_sources(GhostDelay
         Source/PluginEditor.h
         Source/GhostEngine.cpp
         Source/GhostEngine.h
-        Source/EnigmaFilter.h
         Source/GhostRenderer.cpp
         Source/GhostRenderer.h
         Source/FilmstripKnob.cpp
         Source/FilmstripKnob.h
-        Source/SpectrumDisplay.cpp
-        Source/SpectrumDisplay.h
+        Source/WaveDisplay.h
 )
 
 # Binary resources from Blender renders
@@ -51,6 +49,7 @@ juce_add_binary_data(GhostDelayData
     SOURCES
         Resources/background.png
         Resources/ghost_spritesheet.png
+        Resources/spec_sheet.png
         Resources/knob_DIR.png
         Resources/knob_ENV.png
         Resources/knob_FDBK.png
@@ -78,4 +77,21 @@ target_compile_definitions(GhostDelay
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
+)
+
+# Offline engine stress test (clicks / blowout regression)
+juce_add_console_app(GhostEngineTest PRODUCT_NAME "GhostEngineTest")
+target_sources(GhostEngineTest PRIVATE
+    Tests/EngineStressTest.cpp
+    Source/GhostEngine.cpp
+)
+target_link_libraries(GhostEngineTest PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+    PUBLIC
+    juce::juce_recommended_config_flags
+)
+target_compile_definitions(GhostEngineTest PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
 )
