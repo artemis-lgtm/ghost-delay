@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets.h"
 
 GhostDelayProcessor::GhostDelayProcessor()
     : AudioProcessor(BusesProperties()
@@ -18,37 +19,37 @@ GhostDelayProcessor::createParameterLayout()
 
     // Top row (active)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("time", 1), "SIZE",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.5f));
-
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("feedback", 1), "DECAY",
+        juce::ParameterID("amount", 1), "AMOUNT",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.4f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("decay", 1), "TONE",
+        juce::ParameterID("rate", 1), "RATE",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("filter", 1), "FILTER",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.6f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("tone", 1), "MIX",
+        juce::ParameterID("mix", 1), "MIX",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.35f));
 
-    // Bottom row — reverb-native effects (legacy param IDs kept for state compat)
+    // Bottom row — texture layer
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("rate", 1), "SHIMMER",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // octave-up tail regen
+        juce::ParameterID("crush", 1), "CRUSH",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // bit crush + sample hold
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("depth", 1), "DUCK",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // input ducks the wet
+        juce::ParameterID("noise", 1), "NOISE",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.2f));   // tape hiss + hum bed
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("spread", 1), "WIDTH",
+        juce::ParameterID("width", 1), "WIDTH",
         juce::NormalisableRange<float>(0.0f, 1.0f), 0.667f)); // M/S width 0..150%
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID("mix", 1), "GRIT",
-        juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));   // wet saturation + darken
+        juce::ParameterID("drive", 1), "DRIVE",
+        juce::NormalisableRange<float>(0.0f, 1.0f), 0.3f));   // tape saturation drive
 
     return { params.begin(), params.end() };
 }
@@ -111,16 +112,16 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
 
     // Top row
-    engine.setSize(*apvts.getRawParameterValue("time"));
-    engine.setDecay(*apvts.getRawParameterValue("feedback"));
-    engine.setTone(*apvts.getRawParameterValue("decay"));
-    engine.setMix(*apvts.getRawParameterValue("tone"));
+    engine.setAmount(*apvts.getRawParameterValue("amount"));
+    engine.setRate(*apvts.getRawParameterValue("rate"));
+    engine.setFilter(*apvts.getRawParameterValue("filter"));
+    engine.setMix(*apvts.getRawParameterValue("mix"));
 
     // Bottom row
-    engine.setShimmer(*apvts.getRawParameterValue("rate"));
-    engine.setDuck(*apvts.getRawParameterValue("depth"));
-    engine.setWidth(*apvts.getRawParameterValue("spread"));
-    engine.setGrit(*apvts.getRawParameterValue("mix"));
+    engine.setCrush(*apvts.getRawParameterValue("crush"));
+    engine.setNoise(*apvts.getRawParameterValue("noise"));
+    engine.setWidth(*apvts.getRawParameterValue("width"));
+    engine.setDrive(*apvts.getRawParameterValue("drive"));
 
     engine.process(buffer, getPlayHead());
 
@@ -150,6 +151,7 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 void GhostDelayProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    state.setProperty("program", currentProgram, nullptr);
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
 }
@@ -158,7 +160,52 @@ void GhostDelayProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
     if (xml && xml->hasTagName(apvts.state.getType()))
-        apvts.replaceState(juce::ValueTree::fromXml(*xml));
+    {
+        auto state = juce::ValueTree::fromXml(*xml);
+        currentProgram = (int) state.getProperty("program", 0);
+        apvts.replaceState(state);
+    }
+}
+
+// ---- factory presets (Austin 6/14) -------------------------------------
+// Programs are loaded via the host's built-in preset selector; the plugin
+// faceplate is unchanged. Defaults are restored before each preset applies
+// its own overrides, so non-listed params snap back rather than carrying
+// over from the previous selection.
+
+int GhostDelayProcessor::getNumPrograms()
+{
+    return (int) getFactoryPresets().size();
+}
+
+const juce::String GhostDelayProcessor::getProgramName(int index)
+{
+    const auto& presets = getFactoryPresets();
+    if (index >= 0 && index < (int) presets.size())
+        return presets[(size_t) index].name;
+    return {};
+}
+
+void GhostDelayProcessor::setCurrentProgram(int index)
+{
+    const auto& presets = getFactoryPresets();
+    if (index < 0 || index >= (int) presets.size())
+        return;
+
+    // Hosts replay the saved program number after setStateInformation —
+    // re-applying the factory preset would wipe the user's restored tweaks.
+    if (index == currentProgram)
+        return;
+
+    currentProgram = index;
+
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(p))
+            rp->setValueNotifyingHost(rp->getDefaultValue());
+
+    for (const auto& [id, value] : presets[(size_t) index].values)
+        if (auto* rp = apvts.getParameter(id))
+            rp->setValueNotifyingHost(rp->convertTo0to1(value));
 }
 
 juce::AudioProcessorEditor* GhostDelayProcessor::createEditor()

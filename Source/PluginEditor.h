@@ -22,19 +22,21 @@ private:
     GhostDelayProcessor& processor;
     juce::Image background;
 
-    // Top row: SIZE, DECAY, TONE, MIX
-    std::unique_ptr<FilmstripKnob> knobSize, knobDecay, knobTone, knobMix;
-
-    // Bottom row: SHIMMER, DUCK, WIDTH, GRIT
-    std::unique_ptr<FilmstripKnob> knobShimmer, knobDuck, knobWidth, knobGrit;
+    // Face knobs (Haunted Love plate): MIX, RATE, FILTER, CRUSH.
+    // amount/noise/width/drive have no on-face UI — host-automatable only.
+    std::unique_ptr<FilmstripKnob> knobMix, knobRate, knobFilter, knobCrush;
 
     // APVTS attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        attSize, attDecay, attTone, attMix,
-        attShimmer, attDuck, attWidth, attGrit;
+        attMix, attRate, attFilter, attCrush;
 
-    // Ghost animation
+    // Preset selector over the baked plate box
+    juce::ComboBox presetBox;
+
+    // Ghost animation + XY pad (drag ghost: x=amount, y=rate)
     GhostRenderer ghostRenderer;
+    juce::RangedAudioParameter* paramAmount = nullptr;
+    juce::RangedAudioParameter* paramRate = nullptr;
 
     // Live output waveform on the top LED strip (real audio tap)
     WaveDisplay waveDisplay;

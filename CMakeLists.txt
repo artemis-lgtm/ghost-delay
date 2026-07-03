@@ -16,9 +16,9 @@ endif()
 juce_add_plugin(GhostDelay
     COMPANY_NAME "GhostAudio"
     PLUGIN_MANUFACTURER_CODE Ghst
-    PLUGIN_CODE Gdly
+    PLUGIN_CODE GcrT
     FORMATS AU VST3 Standalone
-    PRODUCT_NAME "Ghost Machine"
+    PRODUCT_NAME "Ghost CRT"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
@@ -79,6 +79,29 @@ target_compile_definitions(GhostDelay
         JUCE_VST3_CAN_REPLACE_VST2=0
 )
 
+# Offscreen UI snapshot tool (dev only — renders the editor to a PNG)
+juce_add_console_app(GhostSnapshot PRODUCT_NAME "GhostSnapshot")
+target_sources(GhostSnapshot PRIVATE
+    Tools/SnapshotMain.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/GhostEngine.cpp
+    Source/GhostRenderer.cpp
+    Source/FilmstripKnob.cpp
+)
+target_link_libraries(GhostSnapshot PRIVATE
+    GhostDelayData
+    juce::juce_audio_utils
+    juce::juce_dsp
+    PUBLIC
+    juce::juce_recommended_config_flags
+)
+target_compile_definitions(GhostSnapshot PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1
+)
+
 # Offline engine stress test (clicks / blowout regression)
 juce_add_console_app(GhostEngineTest PRODUCT_NAME "GhostEngineTest")
 target_sources(GhostEngineTest PRIVATE
@@ -92,6 +115,23 @@ target_link_libraries(GhostEngineTest PRIVATE
     juce::juce_recommended_config_flags
 )
 target_compile_definitions(GhostEngineTest PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+)
+
+# Offline demo renderer (dry loop + ghost-drag automated wet pass)
+juce_add_console_app(GhostDemoRender PRODUCT_NAME "GhostDemoRender")
+target_sources(GhostDemoRender PRIVATE
+    Tools/DemoRender.cpp
+    Source/GhostEngine.cpp
+)
+target_link_libraries(GhostDemoRender PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+    PUBLIC
+    juce::juce_recommended_config_flags
+)
+target_compile_definitions(GhostDemoRender PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
 )

@@ -16,42 +16,70 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
         return k;
     };
 
-    // Top row: SIZE, DECAY, TONE, MIX
-    knobSize  = makeKnob("SIZE",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
-    knobDecay = makeKnob("DECAY", BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
-    knobTone  = makeKnob("TONE",  BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
-    knobMix   = makeKnob("MIX",   BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
+    // Haunted Love face: MIX, RATE, FILTER, CRUSH (plate order)
+    knobMix    = makeKnob("MIX",    BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
+    knobRate   = makeKnob("RATE",   BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
+    knobFilter = makeKnob("FILTER", BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
+    knobCrush  = makeKnob("CRUSH",  BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
 
-    // Bottom row: SHIMMER, DUCK, WIDTH, GRIT (reverb-native)
-    knobShimmer = makeKnob("SHIMMER", BinaryData::knob_TIME_png,   BinaryData::knob_TIME_pngSize);
-    knobDuck    = makeKnob("DUCK",    BinaryData::knob_FDBK_png,   BinaryData::knob_FDBK_pngSize);
-    knobWidth   = makeKnob("WIDTH",   BinaryData::knob_FREEZE_png, BinaryData::knob_FREEZE_pngSize);
-    knobGrit    = makeKnob("GRIT",    BinaryData::knob_MIX_png,    BinaryData::knob_MIX_pngSize);
-
-    // Attach to APVTS
     auto& apvts = processor.getAPVTS();
-    attSize  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "time",     *knobSize);
-    attDecay = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "feedback", *knobDecay);
-    attTone  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "decay",    *knobTone);
-    attMix   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "tone",     *knobMix);
+    attMix    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "mix",    *knobMix);
+    attRate   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "rate",   *knobRate);
+    attFilter = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "filter", *knobFilter);
+    attCrush  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "crush",  *knobCrush);
 
-    attShimmer = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "rate",   *knobShimmer);
-    attDuck    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "depth",  *knobDuck);
-    attWidth   = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "spread", *knobWidth);
-    attGrit    = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "mix",    *knobGrit);
+    // Preset selector over the baked plate box
+    for (int i = 0; i < processor.getNumPrograms(); ++i)
+        presetBox.addItem(processor.getProgramName(i), i + 1);
+    presetBox.setSelectedId(processor.getCurrentProgram() + 1, juce::dontSendNotification);
+    presetBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff05090d));
+    presetBox.setColour(juce::ComboBox::textColourId, juce::Colour(0xffa8c8c8));
+    presetBox.setColour(juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
+    presetBox.setColour(juce::ComboBox::arrowColourId, juce::Colour(0xffa8c8c8));
+    presetBox.onChange = [this] {
+        const int idx = presetBox.getSelectedId() - 1;
+        if (idx >= 0 && idx != processor.getCurrentProgram())
+            processor.setCurrentProgram(idx);
+    };
+    addAndMakeVisible(presetBox);
 
-    // Ghost renderer
+    // Ghost renderer — the ghost IS the XY performance pad (reference behavior):
+    // drag it across the screen, X = AMOUNT (warp depth), Y = RATE (top = fast).
     ghostRenderer.loadSpritesheet(
         BinaryData::ghost_spritesheet_png,
         BinaryData::ghost_spritesheet_pngSize,
         16, 12, 192);
+    // Hand it the clean screen field, cropped from the plate render
+    // (inner glass is (108,88)-(1572,686) in the 1680x1080 design)
+    if (!background.isNull())
+    {
+        const float sx = background.getWidth() / 1680.0f;
+        const float sy = background.getHeight() / 1080.0f;
+        ghostRenderer.setFieldImage(background.getClippedImage(
+            { (int) (108 * sx), (int) (88 * sy),
+              (int) (1464 * sx), (int) (598 * sy) })
+            .convertedToFormat(juce::Image::ARGB));
+    }
+    paramAmount = apvts.getParameter("amount");
+    paramRate   = apvts.getParameter("rate");
+    ghostRenderer.onDragStart = [this] {
+        paramAmount->beginChangeGesture();
+        paramRate->beginChangeGesture();
+    };
+    ghostRenderer.onDragEnd = [this] {
+        paramAmount->endChangeGesture();
+        paramRate->endChangeGesture();
+    };
+    ghostRenderer.onGhostMoved = [this](float nx, float ny) {
+        paramAmount->setValueNotifyingHost(nx);
+        paramRate->setValueNotifyingHost(1.0f - ny);
+    };
     addAndMakeVisible(ghostRenderer);
 
-    // Live waveform on the top LED strip (real audio tap from the processor)
-    addAndMakeVisible(waveDisplay);
+    // waveDisplay unused on the Haunted Love face (screen is the baked warp field)
 
     startTimerHz(30);
-    setSize(471, 615);   // 1240x1620 design @ 0.37984
+    setSize(840, 540);   // 1680x1080 design @ 0.5
 }
 
 GhostDelayEditor::~GhostDelayEditor()
@@ -62,6 +90,11 @@ GhostDelayEditor::~GhostDelayEditor()
 void GhostDelayEditor::timerCallback()
 {
     ghostRenderer.setAudioLevel(processor.getCurrentRMSLevel());
+
+    // Host automation / preset changes move the ghost (no-op mid-drag)
+    ghostRenderer.setGhostPosition(paramAmount->getValue(),
+                                   1.0f - paramRate->getValue());
+    ghostRenderer.setWarpParams(paramAmount->getValue(), paramRate->getValue());
     waveDisplay.repaint();
 
     // Self-capture trigger
@@ -91,43 +124,32 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     // Version label (small, bottom-right corner)
     g.setColour(juce::Colour(0x44, 0x55, 0x55));
     g.setFont(juce::FontOptions(9.0f));
-    g.drawText("v7.2", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
+    g.drawText("HL v1.0", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
 }
 
 void GhostDelayEditor::resized()
 {
-    // Pedal design space: knob centers x (230,490,750,1010), rows y 640/1020,
-    // scaled by 471/1240 = 0.37984. Labels are baked above the knobs.
-    //
-    // v2 shadowed frames (320px, CS shadow recipe): the knob disc is NOT
-    // centered in the frame — measured disc center (160.04, 150.22), disc
-    // diameter 250px. To show an 84px disc, draw the frame at 84*320/250
-    // ≈ 108px and offset so the DISC center lands on the knob center.
-    const int fs = 108;                              // drawn frame size
-    const int ox = (int) std::round(fs * 160.04 / 320.0);  // 54: disc cx in frame
-    const int oy = (int) std::round(fs * 150.22 / 320.0);  // 51: disc cy in frame
+    // Haunted Love plate: 1680x1080 design rendered knobless, editor at 0.5x
+    // (840x540). Knob centers from knob-positions-gui.json: x 470/760/1050/1340,
+    // y 865, disc r 86 design px -> 86px disc on screen at 0.5 x r*2.
+    // Filmstrip frame math (v2 CS shadow recipe): disc center in the 320px
+    // frame is (160.04, 150.22), disc diameter 250 -> frame = disc*320/250.
+    const int fs = (int) std::round(86.0 * 320.0 / 250.0);       // 110
+    const int ox = (int) std::round(fs * 160.04 / 320.0);        // 55
+    const int oy = (int) std::round(fs * 150.22 / 320.0);        // 52
     auto place = [&](FilmstripKnob& k, int cx, int cy)
     {
         k.setBounds(cx - ox, cy - oy, fs, fs);
     };
+    place(*knobMix,    235, 432);
+    place(*knobRate,   380, 432);
+    place(*knobFilter, 525, 432);
+    place(*knobCrush,  670, 432);
 
-    // Top row: SIZE, DECAY, TONE, MIX
-    place(*knobSize,   87, 243);
-    place(*knobDecay, 186, 243);
-    place(*knobTone,  285, 243);
-    place(*knobMix,   384, 243);
+    // Ghost roams the warp screen: inner glass (108,88)-(1572,686) design -> 0.5x
+    ghostRenderer.setBounds(54, 44, 732, 299);
+    ghostRenderer.setSpriteOffset(54, 44);
 
-    // Bottom row: SHIMMER, DUCK, WIDTH, GRIT
-    place(*knobShimmer,  87, 387);
-    place(*knobDuck,    186, 387);
-    place(*knobWidth,   285, 387);
-    place(*knobGrit,    384, 387);
-
-    // Ghost renderer — fills the OLED well baked into the new background
-    ghostRenderer.setBounds(78, 454, 315, 107);
-    ghostRenderer.setSpriteOffset(78, 454);
-
-    // Live waveform — fills the analyzer panel window, covering the static
-    // wave baked into the plate (measured: design x 184-1056, y 301-408)
-    waveDisplay.setBounds(70, 114, 332, 42);
+    // Preset selector over the baked inset field (76,896 266x52 design -> 0.5x)
+    presetBox.setBounds(38, 448, 133, 26);
 }

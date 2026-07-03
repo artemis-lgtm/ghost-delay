@@ -23,10 +23,10 @@ public:
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 4.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram(int) override {}
-    const juce::String getProgramName(int) override { return {}; }
+    int getNumPrograms() override;
+    int getCurrentProgram() override { return currentProgram; }
+    void setCurrentProgram(int index) override;
+    const juce::String getProgramName(int index) override;
     void changeProgramName(int, const juce::String&) override {}
 
     void getStateInformation(juce::MemoryBlock& destData) override;
@@ -64,6 +64,8 @@ private:
     int scopeChunk = 256;       // samples per scope bin (set in prepareToPlay)
     int scopeAccumCount = 0;
     float scopeAccumPeak = 0.0f;
+
+    int currentProgram = 0;     // selected factory preset index (Austin 6/14)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GhostDelayProcessor)
 };
