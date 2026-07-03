@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "BinaryData.h"
+#include "Presets.h"
 
 GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     : AudioProcessorEditor(&p), processor(p), waveDisplay(p)
@@ -28,9 +29,20 @@ GhostDelayEditor::GhostDelayEditor(GhostDelayProcessor& p)
     attFilter = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "filter", *knobFilter);
     attCrush  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "crush",  *knobCrush);
 
-    // Preset selector over the baked plate box
-    for (int i = 0; i < processor.getNumPrograms(); ++i)
-        presetBox.addItem(processor.getProgramName(i), i + 1);
+    // Preset selector over the baked plate box, grouped by category
+    {
+        juce::String lastCat;
+        for (int i = 0; i < processor.getNumPrograms(); ++i)
+        {
+            const juce::String cat(getFactoryPresetCategory(i));
+            if (cat != lastCat && cat != "BASIC")
+            {
+                presetBox.addSectionHeading(cat);
+                lastCat = cat;
+            }
+            presetBox.addItem(processor.getProgramName(i), i + 1);
+        }
+    }
     presetBox.setSelectedId(processor.getCurrentProgram() + 1, juce::dontSendNotification);
     presetBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff05090d));
     presetBox.setColour(juce::ComboBox::textColourId, juce::Colour(0xffa8c8c8));
