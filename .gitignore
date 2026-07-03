@@ -1,12 +1,5 @@
 build/
+build-univ/
+build-*/
+*.log
 .DS_Store
-*.o
-*.d
-*.dylib
-*.app
-*.component
-*.vst3
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile

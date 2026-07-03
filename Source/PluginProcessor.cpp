@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets.h"
 
 GhostDelayProcessor::GhostDelayProcessor()
     : AudioProcessor(BusesProperties()
@@ -150,6 +151,7 @@ void GhostDelayProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 void GhostDelayProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    state.setProperty("program", currentProgram, nullptr);
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
 }
@@ -158,7 +160,52 @@ void GhostDelayProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
     if (xml && xml->hasTagName(apvts.state.getType()))
-        apvts.replaceState(juce::ValueTree::fromXml(*xml));
+    {
+        auto state = juce::ValueTree::fromXml(*xml);
+        currentProgram = (int) state.getProperty("program", 0);
+        apvts.replaceState(state);
+    }
+}
+
+// ---- factory presets (Austin 6/14) -------------------------------------
+// Programs are loaded via the host's built-in preset selector; the plugin
+// faceplate is unchanged. Defaults are restored before each preset applies
+// its own overrides, so non-listed params snap back rather than carrying
+// over from the previous selection.
+
+int GhostDelayProcessor::getNumPrograms()
+{
+    return (int) getFactoryPresets().size();
+}
+
+const juce::String GhostDelayProcessor::getProgramName(int index)
+{
+    const auto& presets = getFactoryPresets();
+    if (index >= 0 && index < (int) presets.size())
+        return presets[(size_t) index].name;
+    return {};
+}
+
+void GhostDelayProcessor::setCurrentProgram(int index)
+{
+    const auto& presets = getFactoryPresets();
+    if (index < 0 || index >= (int) presets.size())
+        return;
+
+    // Hosts replay the saved program number after setStateInformation —
+    // re-applying the factory preset would wipe the user's restored tweaks.
+    if (index == currentProgram)
+        return;
+
+    currentProgram = index;
+
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(p))
+            rp->setValueNotifyingHost(rp->getDefaultValue());
+
+    for (const auto& [id, value] : presets[(size_t) index].values)
+        if (auto* rp = apvts.getParameter(id))
+            rp->setValueNotifyingHost(rp->convertTo0to1(value));
 }
 
 juce::AudioProcessorEditor* GhostDelayProcessor::createEditor()

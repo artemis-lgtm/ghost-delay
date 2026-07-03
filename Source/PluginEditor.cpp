@@ -91,7 +91,7 @@ void GhostDelayEditor::paint(juce::Graphics& g)
     // Version label (small, bottom-right corner)
     g.setColour(juce::Colour(0x44, 0x55, 0x55));
     g.setFont(juce::FontOptions(9.0f));
-    g.drawText("v7.2", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
+    g.drawText("v7.3", getWidth() - 32, getHeight() - 14, 28, 12, juce::Justification::centredRight);
 }
 
 void GhostDelayEditor::resized()
