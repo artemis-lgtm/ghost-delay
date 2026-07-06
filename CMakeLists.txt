@@ -135,3 +135,27 @@ target_compile_definitions(GhostDemoRender PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
 )
+
+juce_add_console_app(GhostFaceAnim PRODUCT_NAME "GhostFaceAnim")
+target_sources(GhostFaceAnim PRIVATE
+    Tools/FaceAnim.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/GhostEngine.cpp
+    Source/GhostRenderer.cpp
+    Source/FilmstripKnob.cpp
+)
+target_link_libraries(GhostFaceAnim PRIVATE
+    GhostDelayData
+    juce::juce_audio_utils
+    juce::juce_dsp
+    PUBLIC
+    juce::juce_recommended_config_flags
+)
+target_compile_definitions(GhostFaceAnim PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1
+)
+
+# Offline engine stress test (clicks / blowout regression)
